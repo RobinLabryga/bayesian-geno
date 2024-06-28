@@ -9,7 +9,6 @@ import numpy
 from util import value_or_func, value_or_value
 
 
-# TODO: Comments on GPCache members
 # TODO: Comments on GP members
 # TODO: Sort members to have public interface at the top and everything else at the bottom
 
@@ -964,6 +963,8 @@ class GaussianProcess:
         return self.np.abs(self.g_known - gp_g_values).sum()
 
 
+# TODO: move to own file
+# TODO: Comments on GPCache members
 class GPPrediction:
     """A class that saves intermediate computations performed by the Gaussian Process to predict at a specific x."""
 
