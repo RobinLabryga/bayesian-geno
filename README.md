@@ -5,7 +5,7 @@ This repo contains a version of the [genosolver](https://github.com/slaue/genoso
 ## Code
 
 - [gaussian_process.GaussianProcess](./gaussian_process/gaussian_process.py) Is the Gaussian Process class
-- [gaussian_process.GPPrediction](TODO)
+- [gaussian_process.GPPrediction](./gaussian_process/predictions.py) Is a class that caches matrices used by a GP to reduce duplicate computations
 - [gaussian_process.GPFunctions](./gaussian_process/GPfunctions.py) contains functions for visualization of Gaussian Processes
 - [gaussian_process.kernels](./gaussian_process/kernels.py) Contains various kernels (SE, Matern, Cubic, ...)
 - [gaussian_process.prior_mean](./gaussian_process/prior_mean.py) Contains various prior means (Zero, Linear, ...)

@@ -1,1 +1,2 @@
-from gaussian_process.gaussian_process import GaussianProcess, GPPrediction
+from gaussian_process.gaussian_process import GaussianProcess
+from gaussian_process.predictions import GPPrediction
