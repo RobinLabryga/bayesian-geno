@@ -45,3 +45,12 @@ These are notebooks, that visually test the acquisition functions and their opti
 - [acquisition_functions.ipynb)](./acquisition_functions.ipynb) Visualizes the acquisition functions
 - [discrete_optimization.ipynb)](./discrete_optimization.ipynb) Test optimization via discrete samples
 - [continuous_optimization.ipynb)](./continuous_optimization.ipynb) Test continuous optimization
+
+### Issues
+
+These are notebooks, that visualize issues that where encountered
+
+- [High std_deviation at sample points](./issue_high_std_at_sample.ipynb)
+- [Large errors when range of values large](./issue_large_error_on_large_range.ipynb)
+- [Can't compute Cholesky on pd kernel](./issue_matrix_not_pd.ipynb)
+- [Mean does not go to prior](./issue_mean_not_towards_prior.ipynb)
