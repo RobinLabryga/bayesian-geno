@@ -287,6 +287,10 @@ class GlobalLocalAcquisitionOptimizer(AcquisitionOptimizer):
         nAcquisitionF = lambda x: -acquisition(x)
         nAcquisitionG = lambda x: -acquisition.derivative(x)
 
+        def nAcquisitionFG(x):
+            f, g = acquisition.value_derivative(x)
+            return -f, -g
+
         bounds = [(lower_bound, upper_bound)]
 
         result = scipy.optimize.differential_evolution(
@@ -297,10 +301,10 @@ class GlobalLocalAcquisitionOptimizer(AcquisitionOptimizer):
         )
 
         result = scipy.optimize.minimize(
-            nAcquisitionF,
+            nAcquisitionFG,
             result.x,
             method="L-BFGS-B",
-            jac=nAcquisitionG,
+            jac=True,
             bounds=bounds,
             tol=self.desired_accuracy,
             options={"maxiter": self.max_iterations},
