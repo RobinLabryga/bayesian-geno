@@ -1,22 +1,26 @@
 from gaussian_process import GaussianProcess, GPPrediction
-from gaussian_process.kernels import CubicKernel, SquaredExponentialKernel
+from gaussian_process.kernels import (
+    CubicKernel,
+    SquaredExponentialKernel,
+    Matern2_5Kernel,
+)
 import gaussian_process.GPfunctions as gp
 import numpy
 import types
 from acquisition import (
     AcquisitionFunction,
     LowerConfidenceBoundVariance,
+    LowerConfidenceBound,
     GP_LCB_Variance,
     GP_LCB,
     ExpectedImprovement_minimization,
 )
 from acquisition.optimization import (
-    ScipyAcquisitionOptimizer,
     GradientBinarySearchAcquisitionOptimizer,
     DIRECTAcquisitionOptimizer,
+    GlobalLocalAcquisitionOptimizer,
 )
 from gaussian_process.prior_mean import LinearMean, ZeroMean, ConstantMean
-import itertools
 
 from util import value_or_value, value_or_func
 
@@ -33,7 +37,7 @@ class LineSearchDebugOptions:
         report_kernel_hyperparameter: bool = False,
         gp_verbose: bool = False,
         plot_gp: bool = False,
-        plot_threshold: int = 1000,
+        plot_threshold: int = numpy.inf,
     ) -> None:
         """A structure encapsulating options about line search debug
 
@@ -116,7 +120,7 @@ def wolfe_three_met(g, d, g_old, c, np):
     return np.abs(d.T @ g) <= c * np.abs(d.T @ g_old)
 
 
-def wolfe_conditoin_met(f, g, step, d, f_old, g_old, np, c1=1.0e-4, c2=0.9):
+def wolfe_condition_met(f, g, step, d, f_old, g_old, np, c1=1.0e-4, c2=0.9):
     return wolfe_one_met(f, step, d, f_old, g_old, c1) and wolfe_two_met(
         g, d, g_old, c2
     )
@@ -257,15 +261,16 @@ def gp_line_search(
         # Using average distance, min distance, more as length scale
         length_scales = [
             # np.min([np.abs(a - b) for a, b in itertools.pairwise(sorted(step_known))]),
-            step_max / (len(step_known) - 1),
-            1 / 128,
+            # step_max / (len(step_known) - 1),
+            # statistics.mode([abs(a - b) for a, b in itertools.pairwise(step_known)])
+            # 1 / 128,
             # 1 / 64,
             # 1 / 32,
             # 1 / 16,
-            1 / 8,
+            # 1 / 8,
             # 1 / 4,
             # 1 / 2,
-            # 1,
+            1,
             # 2,
             # 4,
             # 8,
@@ -282,11 +287,11 @@ def gp_line_search(
         GP_posterior_lml = None
         for l in length_scales:
             # The kernel used for the GP
-            kernel = SquaredExponentialKernel(l=l)
+            kernel = Matern2_5Kernel(l=l)
 
             l_posterior = None
             # Compute new posterior
-            noise = 1e-14 * abs(float(np.max(f_known)))  # Initial noise relative to f
+            noise = 1e-14 * step_max  # Initial noise relative to x
             while True:
                 try:
                     l_posterior = GaussianProcess(
@@ -316,13 +321,15 @@ def gp_line_search(
             print(f"kernel with l={GP_posterior.kernel.l} with {GP_posterior_lml}")
 
         # Compute acquisition function
+        # f_best = np.max(f_known)
         # acquisitionFunction = ExpectedImprovement_minimization(
-        #     GP_posterior, np.max(f_known)
+        #     GP_posterior, f_best, tradeoff=0.01 * f_best, np=np
         # )
-        acquisitionFunction = GP_LCB(GP_posterior, k + 1, len(step_known), nu=20.0)
+        # acquisitionFunction = GP_LCB(GP_posterior, k + 1, len(step_known), nu=20.0)
+        acquisitionFunction = LowerConfidenceBound(GP_posterior, lcb_factor=2.0, np=np)
 
         # New step is step size with max acquisition
-        acquisitionOptimizer = DIRECTAcquisitionOptimizer()
+        acquisitionOptimizer = GlobalLocalAcquisitionOptimizer()
         step = acquisitionOptimizer.maximize(
             acquisitionFunction,
             0.0,
@@ -445,13 +452,8 @@ def line_search(
         total_fun_eval += fun_eval
 
         # Stop if any of the termination conditions are met
-        if (
-            step is not None
-            # and (
-            #     step == 1.0
-            #     or strong_wolfe_condition_met(f, g, step, d, f_old, g_old, np)
-            # )
-            or k > max_iter
+        if step is not None and strong_wolfe_condition_met(
+            f, g, step, d, f_old, g_old, np
         ):
             return f, g, x, step, total_fun_eval
         if k > max_iter:
@@ -460,8 +462,12 @@ def line_search(
                     "Terminated line search due to exceeded search area reduction iteration count"
                 )
             return f, g, x, step, total_fun_eval
+        if step == step_max:
+            if debug_options.report_termination_reason:
+                print("Terminated line search due to best value at step_max")
+            return f, g, x, step, total_fun_eval
 
         # Half the search area, since gp_line search could not find step on current search area (too big, this large instability or thorough search)
-        if debug_options.report_area_reduction:
-            print(f"Could not find step. Restarting with {step_max * 0.5}")
         step_max *= 0.5
+        if debug_options.report_area_reduction:
+            print(f"Could not find step. Restarting with {step_max}")

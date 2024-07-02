@@ -131,7 +131,7 @@ class LBFGSB:
         self.param.setdefault("grad_test", False)
         self.param.setdefault("ls", 0)
         self.param.setdefault("line_search_debug_options", None)
-        self.param.setdefault("max_sample_count", 30)
+        self.param.setdefault("max_sample_count", 20)
         self.max_m = self.param["m"]
 
     def init_matrices(self):
