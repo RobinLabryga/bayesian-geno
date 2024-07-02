@@ -2,6 +2,7 @@ from acquisition import AcquisitionFunction
 import itertools
 import numpy as np  # Use member
 import bisect
+import scipy.optimize
 
 # TODO: Comments and types
 
@@ -15,9 +16,6 @@ class AcquisitionOptimizer:
         x_known,
     ) -> float:
         assert False, "Not implemented"
-
-
-import scipy.optimize
 
 
 class ScipyAcquisitionOptimizer(AcquisitionOptimizer):
@@ -151,8 +149,8 @@ class DIRECTAcquisitionOptimizer(AcquisitionOptimizer):
     ) -> None:
         super().__init__()
         # TODO: Make parameters
-        self.desired_accuracy = desired_accuracy
         self.max_iterations = max_iterations
+        self.desired_accuracy = desired_accuracy
 
     def _point_below_line(self, origin, end, point):
         angle = np.cross(end.point - origin.point, point.point - origin.point)
@@ -265,3 +263,47 @@ class DIRECTAcquisitionOptimizer(AcquisitionOptimizer):
                 )
 
         return hyperrectangles_sorted_by_value[0].center
+
+
+class GlobalLocalAcquisitionOptimizer(AcquisitionOptimizer):
+    """Jones and Martin suggest in "The DIRECT algorithm: 25 years Later" (also many others) to refine the result of global optimization via local optimization. This class is a very simple variant that uses scipy.optimize methods."""
+
+    def __init__(
+        self, max_iterations: int = 30, desired_accuracy: float = 1e-5
+    ) -> None:
+        super().__init__()
+
+        self.desired_accuracy = desired_accuracy
+        self.max_iterations = max_iterations
+
+    def maximize(
+        self,
+        acquisition: AcquisitionFunction,
+        lower_bound: float,
+        upper_bound: float,
+        x_known,
+    ) -> float:
+        # We minimize the negative to maximize the acquisition.
+        nAcquisitionF = lambda x: -acquisition(x)
+        nAcquisitionG = lambda x: -acquisition.derivative(x)
+
+        bounds = [(lower_bound, upper_bound)]
+
+        result = scipy.optimize.differential_evolution(
+            nAcquisitionF,
+            bounds,
+            maxiter=self.max_iterations,
+            tol=self.desired_accuracy,
+        )
+
+        result = scipy.optimize.minimize(
+            nAcquisitionF,
+            result.x,
+            method="L-BFGS-B",
+            jac=nAcquisitionG,
+            bounds=bounds,
+            tol=self.desired_accuracy,
+            options={"maxiter": self.max_iterations},
+        )
+
+        return result.x.item()
