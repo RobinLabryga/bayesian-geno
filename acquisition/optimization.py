@@ -293,21 +293,27 @@ class GlobalLocalAcquisitionOptimizer(AcquisitionOptimizer):
 
         bounds = [(lower_bound, upper_bound)]
 
-        result = scipy.optimize.differential_evolution(
+        global_result = scipy.optimize.differential_evolution(
             nAcquisitionF,
             bounds,
             maxiter=self.max_iterations,
             tol=self.desired_accuracy,
         )
 
-        result = scipy.optimize.minimize(
-            nAcquisitionFG,
-            result.x,
-            method="L-BFGS-B",
-            jac=True,
-            bounds=bounds,
-            tol=self.desired_accuracy,
-            options={"maxiter": self.max_iterations},
-        )
+        try:
+            local_result = scipy.optimize.minimize(
+                nAcquisitionFG,
+                global_result.x,
+                method="L-BFGS-B",
+                jac=True,
+                bounds=bounds,
+                tol=self.desired_accuracy,
+                options={"maxiter": self.max_iterations},
+            )
+        except ValueError:
+            # scipy-stubs/optimize/_lbfgsb.pyi _lbfgsb.setulb sometimes sets x to nan. This results in a ValueError that we catch here
+            # TODO: Maybe look more into. Could be because gradient at x0=0.0 points to left
+            print(f"Search from {global_result.x} resulted in Value error")
+            return global_result.x.item()
 
-        return result.x.item()
+        return local_result.x.item()
