@@ -263,6 +263,7 @@ def gp_line_search(
             # np.min([np.abs(a - b) for a, b in itertools.pairwise(sorted(step_known))]),
             # step_max / (len(step_known) - 1),
             # statistics.mode([abs(a - b) for a, b in itertools.pairwise(step_known)])
+            step_max
             # 1 / 128,
             # 1 / 64,
             # 1 / 32,
@@ -270,7 +271,7 @@ def gp_line_search(
             # 1 / 8,
             # 1 / 4,
             # 1 / 2,
-            1,
+            # 1,
             # 2,
             # 4,
             # 8,
