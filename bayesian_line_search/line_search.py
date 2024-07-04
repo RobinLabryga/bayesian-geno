@@ -197,6 +197,10 @@ def gp_line_search(
             if k != 0:
                 if debug_options.report_insufficient_acquisition:
                     print("Acquisition function found same value multiple times")
+                if debug_options.report_termination_reason:
+                    print(
+                        "Line search terminated due to duplicate condition value found"
+                    )
                 break
 
             s_index = np.where(step_known == step)[0][0]
@@ -213,7 +217,9 @@ def gp_line_search(
                     print(
                         f"Encountered f={f} at step={step}, which can not be used for Gaussian Process"
                     )
-                    break  # Let caller decide how to change search area
+                if debug_options.report_termination_reason:
+                    print(f"Line search terminated due to condition value not finite")
+                break  # Let caller decide how to change search area
             else:
                 # Update known information
                 step_known = np.append(step_known, step)
@@ -455,39 +461,16 @@ def line_search(
         total_fun_eval += fun_eval
 
         # Stop if any of the termination conditions are met
-        if step is not None and strong_wolfe_condition_met(
-            f, g, step, d, f_old, g_old, np
-        ):
+        if k > max_iter or (step is not None and step > 0.0):
             if debug_options.report_termination_reason:
-                print(
-                    f"Terminated line search due to strong wolfe after {k} iterations"
-                )
-            return f, g, x, step, total_fun_eval
-        if (
-            k > max_iter
-            or step
-            == step_max  # Step that fulfils strong wolfe is likely outside of search interval
-        ):
-            if debug_options.report_termination_reason:
-                if step == step_max:
-                    print("Terminated line search due to best value at step_max")
-                    print(step, f)  # TODO: Remove
-                    print(f_old - f)
-                else:
+                if step is not None and step > 0.0:
                     print(
-                        "Terminated line search due to exceeded search area reduction iteration count"
+                        f"Terminated line search due to better value found after {k} iterations"
                     )
+                else:
+                    print("Terminated line search due to exceeded iteration count")
 
-            best_data_point = find_best_data_point(data_points)
-            if best_data_point.step == 0.0:
-                return f_old, g_old, x_old, None, total_fun_eval
-            return (
-                best_data_point.f,
-                best_data_point.g,
-                best_data_point.x,
-                best_data_point.step,
-                total_fun_eval,
-            )
+            return f, g, x, step, total_fun_eval
 
         # Half the search area, since gp_line search could not find step on current search area (too big, this large instability or thorough search)
         # TODO: Reduce area to be around best value found yet maybe
