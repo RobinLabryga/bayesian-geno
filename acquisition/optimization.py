@@ -298,6 +298,7 @@ class GlobalLocalAcquisitionOptimizer(AcquisitionOptimizer):
             bounds,
             maxiter=self.max_iterations,
             tol=self.desired_accuracy,
+            seed=0,
         )
 
         try:
@@ -313,7 +314,7 @@ class GlobalLocalAcquisitionOptimizer(AcquisitionOptimizer):
         except ValueError:
             # scipy-stubs/optimize/_lbfgsb.pyi _lbfgsb.setulb sometimes sets x to nan. This results in a ValueError that we catch here
             # TODO: Maybe look more into. Could be because gradient at x0=0.0 points to left
-            print(f"Search from {global_result.x} resulted in Value error")
+            # print(f"Search from {global_result.x} resulted in Value error")
             return global_result.x.item()
 
         return local_result.x.item()
