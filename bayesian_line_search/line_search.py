@@ -108,6 +108,14 @@ class DataPoint:
         self.step_g = step_g
 
 
+def find_best_data_point(data_points: list[DataPoint]):
+    best = None
+    for data_point in data_points:
+        if best is None or data_point.f < best.f:
+            best = data_point
+    return data_point
+
+
 def wolfe_one_met(f, step, d, f_old, g_old, c):
     return f <= f_old + c * step * d.T @ g_old
 
@@ -164,8 +172,6 @@ def gp_line_search(
     S_debug = None
     f_debug = None
 
-    max_iter = max_sample_count  # If the acquisition does not find new point, sample count won't increase, so we have to stop eventually
-
     # Vectors to hold the information we have already queried previously
     step_known, f_known, g_known, step_g_known = zip(
         *[(p.step, p.f, p.g, p.step_g) for p in data_points if p.step <= step_max]
@@ -220,7 +226,7 @@ def gp_line_search(
             # TODO: Make parameter if strong or normal wolfe condition
             if debug_options.report_termination_reason:
                 print(
-                    f"Line search terminated due to strong Wolfe condition after {k} iterations with {step}"
+                    f"Line search terminated due to strong Wolfe condition after {k} sample iterations with {step}"
                 )
             if (
                 debug_options.plot_gp
@@ -239,13 +245,9 @@ def gp_line_search(
                     acquisitionFunction,
                 )
             return f, g, x, step, fun_eval
-        if len(step_known) > max_sample_count:
+        if k > max_sample_count:
             if debug_options.report_termination_reason:
-                print("Line search terminated due to exceeded sample count")
-            break
-        if k > max_iter:
-            if debug_options.report_termination_reason:
-                print("Line search terminated due to exceeded iteration count")
+                print("Line search terminated due to exceeded sample iteration count")
             break
 
         # The prior mean of the Gaussian Process
@@ -456,19 +458,40 @@ def line_search(
         if step is not None and strong_wolfe_condition_met(
             f, g, step, d, f_old, g_old, np
         ):
-            return f, g, x, step, total_fun_eval
-        if k > max_iter:
             if debug_options.report_termination_reason:
                 print(
-                    "Terminated line search due to exceeded search area reduction iteration count"
+                    f"Terminated line search due to strong wolfe after {k} iterations"
                 )
             return f, g, x, step, total_fun_eval
-        if step == step_max:
+        if (
+            k > max_iter
+            or step
+            == step_max  # Step that fulfils strong wolfe is likely outside of search interval
+        ):
             if debug_options.report_termination_reason:
-                print("Terminated line search due to best value at step_max")
-            return f, g, x, step, total_fun_eval
+                if step == step_max:
+                    print("Terminated line search due to best value at step_max")
+                    print(step, f)  # TODO: Remove
+                    print(f_old - f)
+                else:
+                    print(
+                        "Terminated line search due to exceeded search area reduction iteration count"
+                    )
+
+            best_data_point = find_best_data_point(data_points)
+            if best_data_point.step == 0.0:
+                return f_old, g_old, x_old, None, total_fun_eval
+            return (
+                best_data_point.f,
+                best_data_point.g,
+                best_data_point.x,
+                best_data_point.step,
+                total_fun_eval,
+            )
 
         # Half the search area, since gp_line search could not find step on current search area (too big, this large instability or thorough search)
+        # TODO: Reduce area to be around best value found yet maybe
         step_max *= 0.5
         if debug_options.report_area_reduction:
-            print(f"Could not find step. Restarting with {step_max}")
+            print(f"Could not find step. Restarting with step_max={step_max}")
+        k += 1
