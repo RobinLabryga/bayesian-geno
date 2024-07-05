@@ -37,6 +37,70 @@ class GaussianProcess:
         )  # Covariance matrix is matrix of k(x_i, x_j) for all x_i,x_j in X
         return kernel(meshgrid[0], meshgrid[1])
 
+    def _compute_K_known_known(self):
+        if self.x_known is None:
+            return None
+
+        if self.g_known is not None:
+            # K_known_known is a 2 * len(x_known) x 2 * len(x_known) matrix.
+            # Top left is len(x_known) x len(x_known) via covarianceFunction
+            # Top right is len(x_known) x len(x_known) via covarianceFunctionRHSDerived
+            # Bottom left is len(x_known) x len(x_known) via covarianceFunctionLHSDerived
+            # Bottom right is len(x_known) x len(x_known) via covarianceFunctionLHSRHSDerived
+
+            covarianceMatrixLHSDerived = self._compute_gram_matrix(
+                self.x_known,
+                self.x_known,
+                kernel=self.kernel.derivative_lhs,
+            )
+            # Since covarianceFunctionRHSDerived and covarianceFunctionLHSDerived should produce a covariance matrix that is the transpose of the other, we can use the transpose to give a higher chance of avoiding numerical errors.
+            covarianceMatrixRHSDerived = (
+                covarianceMatrixLHSDerived.T
+                if self.kernel.is_symmetric
+                else self._compute_gram_matrix(
+                    self.x_known,
+                    self.x_known,
+                    kernel=self.kernel.derivative_rhs,
+                )
+            )
+            covarianceMatrixDefault = self._compute_gram_matrix(
+                self.x_known, self.x_known, kernel=self.kernel
+            )
+            covarianceMatrixLHSRHSDerived = self._compute_gram_matrix(
+                self.x_known,
+                self.x_known,
+                kernel=self.kernel.derivative_lhsrhs,
+            )
+
+            # Add noise to covariance matrix along main diagonal
+            if self.f_noise is not None:
+                covarianceMatrixDefault += self.np.diag(self.f_noise)
+            if self.g_noise is not None:
+                covarianceMatrixLHSRHSDerived += self.np.diag(self.g_noise)
+
+            # Assemble complete covariance matrix
+            return self.np.concatenate(
+                (
+                    self.np.concatenate(
+                        (covarianceMatrixDefault, covarianceMatrixRHSDerived),
+                        axis=1,
+                    ),
+                    self.np.concatenate(
+                        (covarianceMatrixLHSDerived, covarianceMatrixLHSRHSDerived),
+                        axis=1,
+                    ),
+                ),
+                axis=0,
+            )
+
+        K_known_known = self._compute_gram_matrix(self.x_known, self.x_known)
+
+        # Add noise to covariance function
+        if self.f_noise is not None:
+            K_known_known += self.np.diag(self.f_noise)
+
+        return K_known_known
+
     def _compute_K_x_known(self, x):
         return (
             self._compute_gram_matrix(x, self.x_known)
@@ -125,6 +189,61 @@ class GaussianProcess:
     def _compute_K_x_x_derivative_lhsrhs(self, x):
         return self._compute_gram_matrix(x, x, self.kernel.derivative_lhsrhs)
 
+    def _compute_condition_values(self):
+        if self.x_known is None:
+            return None
+
+        if self.g_known is not None:
+            return self.np.concatenate(
+                (
+                    self.f_known - self.prior_mean(self.x_known),
+                    self.g_known - self.prior_mean.derivative(self.x_known),
+                ),
+                axis=0,
+            )
+
+        return self.f_known - self.prior_mean(self.x_known)
+
+    def _compute_K_known_known_inv(self):
+        if self.K_known_known is None:
+            return None
+
+        return (
+            self.np.linalg.inv(self.K_known_known)
+            if not self.kernel.is_covariance_function
+            else None
+        )
+
+    def _compute_K_known_known_cholesky(self):
+        if self.K_known_known is None:
+            return None
+
+        # We don't catch possible LinAlgErrors here, since the noise is user defined. It might be worth printing a hint, that more noise may solve the issue.
+        return (
+            scipy.linalg.cholesky(self.K_known_known, lower=True)
+            if self.kernel.is_covariance_function
+            else None
+        )
+
+    def _compute_RW06_2_1_alpha(self):
+        if self.K_known_known is None:
+            return None
+
+        # TODO: Maybe add skip_finite=True to solve_triangular
+        return (
+            scipy.linalg.solve_triangular(
+                self.K_known_known_cholesky.T,
+                scipy.linalg.solve_triangular(
+                    self.K_known_known_cholesky,
+                    self.condition_values,
+                    lower=True,
+                ),
+                lower=False,
+            )
+            if self.kernel.is_covariance_function
+            else None
+        )
+
     def __init__(
         self,
         kernel: Kernel,
@@ -203,124 +322,35 @@ class GaussianProcess:
             if type(g_noise) is float
             else g_noise  # ndarray or None
         )
+        """The noise of the known gradients"""
 
         if self.verbose:
             print("Gaussian Process created from points:")
-            print(f"x={self.np.array2string(self.x_known, separator=', ')}")
-            print(f"f={self.np.array2string(self.f_known, separator=', ')}")
-            print(f"f_noise={self.np.array2string(self.f_noise, separator=', ')}")
-            print(f"g={self.np.array2string(self.g_known, separator=', ')}")
-            print(f"g_noise={self.np.array2string(self.g_noise, separator=', ')}")
+            if self.x_known is not None:
+                print(f"x={self.np.array2string(self.x_known, separator=', ')}")
+            if self.f_known is not None:
+                print(f"f={self.np.array2string(self.f_known, separator=', ')}")
+            if self.f_noise is not None:
+                print(f"f_noise={self.np.array2string(self.f_noise, separator=', ')}")
+            if self.g_known is not None:
+                print(f"g={self.np.array2string(self.g_known, separator=', ')}")
+            if self.g_noise is not None:
+                print(f"g_noise={self.np.array2string(self.g_noise, separator=', ')}")
 
-        """The noise of the known gradients"""
-
-        self.K_known_known = None
+        self.K_known_known = self._compute_K_known_known()
         """The Gram matrix of the known xs"""
 
-        if self.x_known is not None:
-            if self.g_known is not None:
-                # K_known_known is a 2 * len(x_known) x 2 * len(x_known) matrix.
-                # Top left is len(x_known) x len(x_known) via covarianceFunction
-                # Top right is len(x_known) x len(x_known) via covarianceFunctionRHSDerived
-                # Bottom left is len(x_known) x len(x_known) via covarianceFunctionLHSDerived
-                # Bottom right is len(x_known) x len(x_known) via covarianceFunctionLHSRHSDerived
+        self.condition_values = self._compute_condition_values()
+        """The values used to condition the GP"""
 
-                covarianceMatrixLHSDerived = self._compute_gram_matrix(
-                    self.x_known,
-                    self.x_known,
-                    kernel=self.kernel.derivative_lhs,
-                )
-                # Since covarianceFunctionRHSDerived and covarianceFunctionLHSDerived should produce a covariance matrix that is the transpose of the other, we can use the transpose to give a higher chance of avoiding numerical errors.
-                covarianceMatrixRHSDerived = (
-                    covarianceMatrixLHSDerived.T
-                    if self.kernel.is_symmetric
-                    else self._compute_gram_matrix(
-                        self.x_known,
-                        self.x_known,
-                        kernel=self.kernel.derivative_rhs,
-                    )
-                )
-                covarianceMatrixDefault = self._compute_gram_matrix(
-                    self.x_known, self.x_known, kernel=self.kernel
-                )
-                covarianceMatrixLHSRHSDerived = self._compute_gram_matrix(
-                    self.x_known,
-                    self.x_known,
-                    kernel=self.kernel.derivative_lhsrhs,
-                )
-
-                # Add noise to covariance matrix along main diagonal
-                if self.f_noise is not None:
-                    covarianceMatrixDefault += self.np.diag(self.f_noise)
-                if self.g_noise is not None:
-                    covarianceMatrixLHSRHSDerived += self.np.diag(self.g_noise)
-
-                # Assemble complete covariance matrix
-                self.K_known_known = self.np.concatenate(
-                    (
-                        self.np.concatenate(
-                            (covarianceMatrixDefault, covarianceMatrixRHSDerived),
-                            axis=1,
-                        ),
-                        self.np.concatenate(
-                            (covarianceMatrixLHSDerived, covarianceMatrixLHSRHSDerived),
-                            axis=1,
-                        ),
-                    ),
-                    axis=0,
-                )
-                self.condition_values = self.np.concatenate(
-                    (
-                        self.f_known - self.prior_mean(self.x_known),
-                        self.g_known - self.prior_mean.derivative(self.x_known),
-                    ),
-                    axis=0,
-                )
-            else:
-                self.K_known_known = self._compute_gram_matrix(
-                    self.x_known, self.x_known
-                )
-
-                # Add noise to covariance function
-                if self.f_noise is not None:
-                    self.K_known_known += self.np.diag(self.f_noise)
-
-                self.condition_values = self.f_known - self.prior_mean(self.x_known)
-
-        """bool: True if the default evaluation equations should be used, False when the cholesky version can be used"""
-        self.K_known_known_inv = None
+        self.K_known_known_inv = self._compute_K_known_known_inv()
         """ndarray: The inverse of K_known_known"""
-        self.K_known_known_cholesky = None
-        """ndarray: The cholesky decomposition of K_known_known"""
-        self.RW06_2_1_alpha = None
-        """ndarray: The alpha component of RW06 Algorithm 2.1"""
 
-        if self.K_known_known is not None:
-            self.K_known_known_inv = (
-                self.np.linalg.inv(self.K_known_known)
-                if not self.kernel.is_covariance_function
-                else None
-            )
-            # We don't catch possible LinAlgErrors here, since the noise is user defined. It might be worth printing a hint, that more noise may solve the issue.
-            self.K_known_known_cholesky = (
-                scipy.linalg.cholesky(self.K_known_known, lower=True)
-                if self.kernel.is_covariance_function
-                else None
-            )
-            # TODO: Maybe add skip_finite=True to solve_triangular
-            self.RW06_2_1_alpha = (
-                scipy.linalg.solve_triangular(
-                    self.K_known_known_cholesky.T,
-                    scipy.linalg.solve_triangular(
-                        self.K_known_known_cholesky,
-                        self.condition_values,
-                        lower=True,
-                    ),
-                    lower=False,
-                )
-                if self.kernel.is_covariance_function
-                else None
-            )
+        self.K_known_known_cholesky = self._compute_K_known_known_cholesky()
+        """ndarray: The cholesky decomposition of K_known_known"""
+
+        self.RW06_2_1_alpha = self._compute_RW06_2_1_alpha()
+        """ndarray: The alpha component of RW06 Algorithm 2.1"""
 
     def _RW06_2_1(
         self, prior_mean: numpy.ndarray, K_x_x: numpy.ndarray, K_known_x: numpy.ndarray
