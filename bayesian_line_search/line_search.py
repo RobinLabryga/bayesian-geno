@@ -64,6 +64,15 @@ class LineSearchDebugOptions:
         # TODO: Options to disable acquisition, objective, gp, derivatives
 
 
+def normalization_parameters(f_known):
+    lowest_f = min(f_known)
+    largest_f = max(f_known)
+    if lowest_f != largest_f:
+        return -lowest_f, 1 / (largest_f - lowest_f)
+
+    return -lowest_f, 1.0
+
+
 def init_S_debug(step_max, np):
     return np.linspace(start=0.0, stop=step_max, num=100)
 
@@ -140,6 +149,11 @@ def strong_wolfe_condition_met(f, g, step, d, f_old, g_old, np, c1=1.0e-4, c2=0.
     )
 
 
+def line_search_condition_met(f, f_old, step, dg):
+    alpha = 0.1
+    return f <= f_old + alpha * step * dg
+
+
 def find_best_step(x_old, f_old, g_old, d, step_known, f_known, g_known, np):
     best_index = np.argmin(f_known)
     # TODO: Maybe return best of posterior mean instead (literature has some info)
@@ -206,6 +220,7 @@ def gp_line_search(
             s_index = np.where(step_known == step)[0][0]
             f = f_known[s_index]
             g = g_known[s_index]
+            step_g = step_g_known[s_index]
         else:  # New step
             f, g = fg(x)
             step_g = np.dot(g, d_norm)
@@ -245,9 +260,9 @@ def gp_line_search(
                 print_debug_info(
                     GP_posterior,
                     S_debug,
-                    f_debug,
+                    (f_debug + normalization_offset) * normalization_scale,
                     step_known,
-                    f_known,
+                    (f_known + normalization_offset) * normalization_scale,
                     acquisitionFunction,
                 )
             return f, g, x, step, fun_eval
@@ -256,14 +271,14 @@ def gp_line_search(
                 print("Line search terminated due to exceeded sample iteration count")
             break
 
+        # Normalize condition values to have consistent scale of std-deviation (sqrt of variance, thus scale has large effect)
+        normalization_offset, normalization_scale = normalization_parameters(f_known)
+        f_known_normalized = (f_known + normalization_offset) * normalization_scale
+        step_g_known_normalized = step_g_known * normalization_scale
+
         # The prior mean of the Gaussian Process
-        # prior_mean = LinearMean(
-        #     (f_known[np.where(step_known == step_max)[0][0]] - f_old) / (step_max),
-        #     f_old,
-        #     np,
-        # )
-        # prior_mean = ZeroMean()
-        prior_mean = ConstantMean(min(f_known), np)
+        prior_mean = ZeroMean()
+        # Same as ConstantMean(min(f_known), np) in un-normalized case
 
         # TODO: Consider hyperparameter optimization (log marginal likelihood)
         # Using average distance, min distance, more as length scale
@@ -272,26 +287,9 @@ def gp_line_search(
             # step_max / (len(step_known) - 1),
             # statistics.mode([abs(a - b) for a, b in itertools.pairwise(step_known)])
             step_max
-            # 1 / 128,
-            # 1 / 64,
-            # 1 / 32,
-            # 1 / 16,
-            # 1 / 8,
-            # 1 / 4,
-            # 1 / 2,
-            # 1,
-            # 2,
-            # 4,
-            # 8,
-            # 16,
-            # 32,
-            # 64,
-            # 128,
-            # 256,
-            # 512,
-            # 1024,
         ]
 
+        # Find length scale with best log marginal likelihood
         GP_posterior = None
         GP_posterior_lml = None
         for l in length_scales:
@@ -306,8 +304,8 @@ def gp_line_search(
                     l_posterior = GaussianProcess(
                         kernel=kernel,
                         x_known=step_known,
-                        f_known=f_known,
-                        g_known=step_g_known,
+                        f_known=f_known_normalized,
+                        g_known=step_g_known_normalized,
                         f_noise=noise,
                         g_noise=noise,
                         prior_mean=prior_mean,
@@ -330,11 +328,6 @@ def gp_line_search(
             print(f"kernel with l={GP_posterior.kernel.l} with {GP_posterior_lml}")
 
         # Compute acquisition function
-        # f_best = np.max(f_known)
-        # acquisitionFunction = ExpectedImprovement_minimization(
-        #     GP_posterior, f_best, tradeoff=0.01 * f_best, np=np
-        # )
-        # acquisitionFunction = GP_LCB(GP_posterior, k + 1, len(step_known), nu=20.0)
         acquisitionFunction = LowerConfidenceBound(GP_posterior, lcb_factor=2.0, np=np)
 
         # New step is step size with max acquisition
@@ -358,7 +351,12 @@ def gp_line_search(
                 S_debug = init_S_debug(step_max, np)
                 f_debug = np.array([fg(x_old + s * d)[0] for s in S_debug])
             print_debug_info(
-                GP_posterior, S_debug, f_debug, step_known, f_known, acquisitionFunction
+                GP_posterior,
+                S_debug,
+                (f_debug + normalization_offset) * normalization_scale,
+                step_known,
+                f_known_normalized,
+                acquisitionFunction,
             )
 
         k += 1
@@ -372,7 +370,12 @@ def gp_line_search(
             S_debug = init_S_debug(step_max, np)
             f_debug = np.array([fg(x_old + s * d)[0] for s in S_debug])
         print_debug_info(
-            GP_posterior, S_debug, f_debug, step_known, f_known, acquisitionFunction
+            GP_posterior,
+            S_debug,
+            (f_debug + normalization_offset) * normalization_scale,
+            step_known,
+            (f_known + normalization_offset) * normalization_scale,
+            acquisitionFunction,
         )
 
     f, g, x, step = find_best_step(
