@@ -52,3 +52,4 @@ These are notebooks, that visualize issues that where encountered
 - [Large errors when range of values large](./issue_large_error_on_large_range.ipynb)
 - [Can't compute Cholesky on pd kernel](./issue_matrix_not_pd.ipynb)
 - [Mean does not go to prior](./issue_mean_not_towards_prior.ipynb)
+- [Scaling effects scale of std deviation](./issue_scaling_effects_std_deviation.ipynb)
