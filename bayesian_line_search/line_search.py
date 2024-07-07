@@ -270,9 +270,13 @@ def gp_line_search(
                     acquisitionFunction,
                 )
             return f, g, x, step, fun_eval
-        if k > max_sample_count:
+        if len(step_known) > max_sample_count:
             if debug_options.report_termination_reason:
-                print("Line search terminated due to exceeded sample iteration count")
+                print("Line search terminated due to exceeded sample count")
+            break
+        if k > max_sample_count:  # TODO: Will this ever execute?
+            if debug_options.report_termination_reason:
+                print("Line search terminated due to exceeded iteration count")
             break
 
         # Normalize condition values to have consistent scale of std-deviation (sqrt of variance, thus scale has large effect)
@@ -481,7 +485,10 @@ def line_search(
 
         # Half the search area, since gp_line search could not find step on current search area (too big, this large instability or thorough search)
         # TODO: Reduce area to be around best value found yet maybe
-        step_max *= 0.5
+        data_points.sort(key=lambda d: d.step)
+        step_max *= min(
+            data_points[5].step if len(data_points) > 5 else step_max, step_max * 0.5
+        )
         if debug_options.report_area_reduction:
             print(f"Could not find step. Restarting with step_max={step_max}")
         k += 1
