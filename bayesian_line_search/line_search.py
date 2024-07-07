@@ -155,16 +155,20 @@ def line_search_condition_met(f, f_old, step, dg):
 
 
 def find_best_step(x_old, f_old, g_old, d, step_known, f_known, g_known, np):
-    best_index = np.argmin(f_known)
     # TODO: Maybe return best of posterior mean instead (literature has some info)
-    step = step_known[best_index]
+
+    smallest_value_indices = np.nonzero(f_known == np.min(f_known))[0]
+    largest_step_with_smallest_value_index = smallest_value_indices[
+        np.argmax(step_known[smallest_value_indices])
+    ]
+    step = step_known[largest_step_with_smallest_value_index]
 
     if step == 0.0:
         return f_old, g_old, x_old, None
 
     x = x_old + step * d
-    f = f_known[best_index]
-    g = g_known[best_index]
+    f = f_known[largest_step_with_smallest_value_index]
+    g = g_known[largest_step_with_smallest_value_index]
 
     return f, g, x, step
 
