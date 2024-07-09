@@ -472,15 +472,22 @@ def line_search(
         total_fun_eval += fun_eval
 
         # Stop if any of the termination conditions are met
-        if k > max_iter or (step is not None and step > 0.0):
-            if debug_options.report_termination_reason:
-                if step is not None and step > 0.0:
-                    print(
-                        f"Terminated line search due to better value found after {k} iterations"
-                    )
-                else:
-                    print("Terminated line search due to exceeded iteration count")
+        if step is not None:
+            if (x == x_old).all(): # Step is to small to change x
+                if debug_options.report_termination_reason:
+                    print(f"Terminated due insufficient precision of problem after {k} iterations")
+                return f_old, g_old, x_old, None, total_fun_eval
 
+            if debug_options.report_termination_reason:
+                print(
+                    f"Terminated line search due to {"better" if f < f_old else "equal"} value found after {k} iterations"
+                )
+
+            return f, g, x, step, total_fun_eval
+        
+        if k > max_iter:
+            if debug_options.report_termination_reason:
+                print("Terminated line search due to exceeded iteration count")
             return f, g, x, step, total_fun_eval
 
         # Half the search area, since gp_line search could not find step on current search area (too big, this large instability or thorough search)
@@ -489,6 +496,8 @@ def line_search(
         step_max *= min(
             data_points[5].step if len(data_points) > 5 else step_max, step_max * 0.5
         )
+        
         if debug_options.report_area_reduction:
             print(f"Could not find step. Restarting with step_max={step_max}")
+            
         k += 1
