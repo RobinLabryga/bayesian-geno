@@ -480,7 +480,7 @@ def line_search(
 
             if debug_options.report_termination_reason:
                 print(
-                    f"Terminated line search due to {"better" if f < f_old else "equal"} value found after {k} iterations"
+                    f"Terminated line search due to {'better' if f < f_old else 'equal'} value found after {k} iterations"
                 )
 
             return f, g, x, step, total_fun_eval
