@@ -912,7 +912,9 @@ class GaussianProcess:
         )
         std_deviation = value_or_func(std_deviation, self.std_deviation, x)
 
-        return derivative_variance / (2.0 * std_deviation)
+        return self.np.divide(
+            derivative_variance, 2.0 * std_deviation, where=(std_deviation != 0.0)
+        )
 
     def sample(
         self,
