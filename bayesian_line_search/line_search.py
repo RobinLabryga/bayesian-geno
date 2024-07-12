@@ -1,7 +1,5 @@
 from gaussian_process import GaussianProcess, GPPrediction
 from gaussian_process.kernels import (
-    CubicKernel,
-    SquaredExponentialKernel,
     Matern2_5Kernel,
 )
 import gaussian_process.GPfunctions as gp
@@ -9,18 +7,12 @@ import numpy
 import types
 from acquisition import (
     AcquisitionFunction,
-    LowerConfidenceBoundVariance,
     LowerConfidenceBound,
-    GP_LCB_Variance,
-    GP_LCB,
-    ExpectedImprovement_minimization,
 )
 from acquisition.optimization import (
-    GradientBinarySearchAcquisitionOptimizer,
-    DIRECTAcquisitionOptimizer,
-    GlobalLocalAcquisitionOptimizer,
+    DIRECT_LBFGSB_AcquisitionOptimizer,
 )
-from gaussian_process.prior_mean import LinearMean, ZeroMean, ConstantMean
+from gaussian_process.prior_mean import ZeroMean
 
 from util import value_or_value, value_or_func
 
@@ -339,7 +331,7 @@ def gp_line_search(
         acquisitionFunction = LowerConfidenceBound(GP_posterior, lcb_factor=2.0, np=np)
 
         # New step is step size with max acquisition
-        acquisitionOptimizer = GlobalLocalAcquisitionOptimizer()
+        acquisitionOptimizer = DIRECT_LBFGSB_AcquisitionOptimizer()
         step = acquisitionOptimizer.maximize(
             acquisitionFunction,
             0.0,

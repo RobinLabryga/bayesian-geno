@@ -43,6 +43,7 @@ These are notebooks, that visually test the acquisition functions and their opti
 - [acquisition_functions.ipynb](./acquisition_functions.ipynb) Visualizes the acquisition functions
 - [discrete_optimization.ipynb](./discrete_optimization.ipynb) Test optimization via discrete samples
 - [continuous_optimization.ipynb](./continuous_optimization.ipynb) Test continuous optimization
+- [compare_optimizers.ipynb](./compare_optimizers.ipynb) Compares different acquisition optimization approaches
 
 ### Issues
 

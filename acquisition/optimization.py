@@ -18,45 +18,6 @@ class AcquisitionOptimizer:
         assert False, "Not implemented"
 
 
-class ScipyAcquisitionOptimizer(AcquisitionOptimizer):
-    def maximize(
-        self,
-        acquisition: AcquisitionFunction,
-        lower_bound: float,
-        upper_bound: float,
-        x_known,
-    ) -> float:
-        # We minimize the negative to maximize the acquisition.
-        nAcquisitionF = lambda x: -acquisition(x)
-        nAcquisitionG = lambda x: -acquisition.derivative(x)
-        # TODO: Add methods to everything to combine evaluations of value and gradient (.fg())
-
-        step = lower_bound
-        delta_s = 1e-15
-        starting_points = {
-            s
-            for a, b in itertools.pairwise(sorted(x_known))
-            for s in [
-                a + delta_s,
-                3 * a / 4 + b / 4,
-                (a + b) / 2.0,
-                a / 4 + 3 * b / 4,
-                b - delta_s,
-            ]
-            if s >= lower_bound and s <= upper_bound
-        }
-        for s in starting_points:
-            result = scipy.optimize.minimize(
-                nAcquisitionF,
-                s,
-                jac=nAcquisitionG,
-                bounds=[(lower_bound, upper_bound)],
-                method="L-BFGS-B",
-            )
-            step = result.x if acquisition(result.x) > acquisition(step) else step
-        return step
-
-
 class GradientBinarySearchAcquisitionOptimizer(AcquisitionOptimizer):
     def maximize(
         self,
@@ -265,7 +226,7 @@ class DIRECTAcquisitionOptimizer(AcquisitionOptimizer):
         return hyperrectangles_sorted_by_value[0].center
 
 
-class GlobalLocalAcquisitionOptimizer(AcquisitionOptimizer):
+class DIRECT_LBFGSB_AcquisitionOptimizer(AcquisitionOptimizer):
     """Jones and Martin suggest in "The DIRECT algorithm: 25 years Later" (also many others) to refine the result of global optimization via local optimization. This class is a very simple variant that uses scipy.optimize methods."""
 
     def __init__(
@@ -285,7 +246,49 @@ class GlobalLocalAcquisitionOptimizer(AcquisitionOptimizer):
     ) -> float:
         # We minimize the negative to maximize the acquisition.
         nAcquisitionF = lambda x: -acquisition(x)
-        nAcquisitionG = lambda x: -acquisition.derivative(x)
+
+        def nAcquisitionFG(x):
+            f, g = acquisition.value_derivative(x)
+            return -f, -g
+
+        bounds = [(lower_bound, upper_bound)]
+
+        global_result = scipy.optimize.direct(
+            nAcquisitionF, bounds, maxiter=self.max_iterations, locally_biased=False
+        )
+
+        local_result = scipy.optimize.minimize(
+            nAcquisitionFG,
+            global_result.x,
+            method="L-BFGS-B",
+            jac=True,
+            bounds=bounds,
+            tol=self.desired_accuracy,
+            options={"maxiter": self.max_iterations},
+        )
+
+        return local_result.x.item()
+
+
+class DE_LBFGSB_AcquisitionOptimizer(AcquisitionOptimizer):
+
+    def __init__(
+        self, max_iterations: int = 30, desired_accuracy: float = 1e-5
+    ) -> None:
+        super().__init__()
+
+        self.desired_accuracy = desired_accuracy
+        self.max_iterations = max_iterations
+
+    def maximize(
+        self,
+        acquisition: AcquisitionFunction,
+        lower_bound: float,
+        upper_bound: float,
+        x_known,
+    ) -> float:
+        # We minimize the negative to maximize the acquisition.
+        nAcquisitionF = lambda x: -acquisition(x)
 
         def nAcquisitionFG(x):
             f, g = acquisition.value_derivative(x)
@@ -301,20 +304,104 @@ class GlobalLocalAcquisitionOptimizer(AcquisitionOptimizer):
             seed=0,
         )
 
-        try:
-            local_result = scipy.optimize.minimize(
-                nAcquisitionFG,
-                global_result.x,
-                method="L-BFGS-B",
-                jac=True,
-                bounds=bounds,
-                tol=self.desired_accuracy,
-                options={"maxiter": self.max_iterations},
-            )
-        except ValueError:
-            # scipy-stubs/optimize/_lbfgsb.pyi _lbfgsb.setulb sometimes sets x to nan. This results in a ValueError that we catch here
-            # TODO: Maybe look more into. Could be because gradient at x0=0.0 points to left
-            # print(f"Search from {global_result.x} resulted in Value error")
-            return global_result.x.item()
+        local_result = scipy.optimize.minimize(
+            nAcquisitionFG,
+            global_result.x,
+            method="L-BFGS-B",
+            jac=True,
+            bounds=bounds,
+            tol=self.desired_accuracy,
+            options={"maxiter": self.max_iterations},
+        )
+
+        return local_result.x.item()
+
+
+class SHGO_LBFGSB_AcquisitionOptimizer(AcquisitionOptimizer):
+    def __init__(
+        self, max_iterations: int = 30, desired_accuracy: float = 1e-5
+    ) -> None:
+        super().__init__()
+
+        self.desired_accuracy = desired_accuracy
+        self.max_iterations = max_iterations
+
+    def maximize(
+        self,
+        acquisition: AcquisitionFunction,
+        lower_bound: float,
+        upper_bound: float,
+        x_known,
+    ) -> float:
+        # We minimize the negative to maximize the acquisition.
+        def nAcquisitionFG(x):
+            f, g = acquisition.value_derivative(x)
+            return -f, -g
+
+        bounds = [(lower_bound, upper_bound)]
+
+        minimizer_kwargs = {"jac": True}
+
+        global_result = scipy.optimize.shgo(
+            nAcquisitionFG,
+            bounds,
+            minimizer_kwargs=minimizer_kwargs,
+            iters=self.max_iterations,
+        )
+
+        local_result = scipy.optimize.minimize(
+            nAcquisitionFG,
+            global_result.x,
+            method="L-BFGS-B",
+            jac=True,
+            bounds=bounds,
+            tol=self.desired_accuracy,
+            options={"maxiter": self.max_iterations},
+        )
+
+        return local_result.x.item()
+
+
+class DA_LBFGSV_AcquisitionOptimizer(AcquisitionOptimizer):
+    def __init__(
+        self, max_iterations: int = 30, desired_accuracy: float = 1e-5
+    ) -> None:
+        super().__init__()
+
+        self.desired_accuracy = desired_accuracy
+        self.max_iterations = max_iterations
+
+    def maximize(
+        self,
+        acquisition: AcquisitionFunction,
+        lower_bound: float,
+        upper_bound: float,
+        x_known,
+    ) -> float:
+        # We minimize the negative to maximize the acquisition.
+        nAcquisitionF = lambda x: -acquisition(x)
+
+        def nAcquisitionFG(x):
+            f, g = acquisition.value_derivative(x)
+            return -f, -g
+
+        bounds = [(lower_bound, upper_bound)]
+
+        global_result = scipy.optimize.dual_annealing(
+            nAcquisitionF,
+            bounds,
+            maxiter=self.max_iterations,
+            seed=0,
+        )
+
+        local_result = scipy.optimize.minimize(
+            nAcquisitionFG,
+            global_result.x,
+            method="L-BFGS-B",
+            jac=True,
+            bounds=bounds,
+            tol=self.desired_accuracy,
+            options={"maxiter": self.max_iterations},
+        )
 
         return local_result.x.item()
