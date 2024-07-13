@@ -208,41 +208,85 @@ class GaussianProcess:
         if self.K_known_known is None:
             return None
 
-        return (
-            self.np.linalg.inv(self.K_known_known)
-            if not self.kernel.is_covariance_function
-            else None
-        )
+        return self.np.linalg.inv(self.K_known_known)
 
     def _compute_K_known_known_cholesky(self):
         if self.K_known_known is None:
             return None
 
         # We don't catch possible LinAlgErrors here, since the noise is user defined. It might be worth printing a hint, that more noise may solve the issue.
-        return (
-            scipy.linalg.cholesky(self.K_known_known, lower=True)
-            if self.kernel.is_covariance_function
-            else None
-        )
+        return scipy.linalg.cholesky(self.K_known_known, lower=True)
 
-    def _compute_RW06_2_1_alpha(self):
+    def _compute_K_known_known_ldl(self):
+        if self.K_known_known is None:
+            return None
+
+        return scipy.linalg.ldl(self.K_known_known, lower=True)
+
+    def _compute_K_known_known_qr(self):
+        if self.K_known_known is None:
+            return None
+
+        return scipy.linalg.qr(self.K_known_known)
+
+    def _compute_K_known_known_qr_inv(self):
+        if self.K_known_known is None:
+            return None
+
+        Q, R = self.K_known_known_qr
+
+        return scipy.linalg.solve_triangular(R, Q.T, lower=False)
+
+    def _compute_cholesky_alpha(self):
         if self.K_known_known is None:
             return None
 
         # TODO: Maybe add skip_finite=True to solve_triangular
+        return scipy.linalg.solve_triangular(
+            self.K_known_known_cholesky,
+            scipy.linalg.solve_triangular(
+                self.K_known_known_cholesky,
+                self.condition_values,
+                lower=True,
+            ),
+            lower=True,
+            trans="T",
+        )
+
+    def _compute_ldl_alpha(self):
+        if self.K_known_known is None:
+            return None
+
+        lu, D, perm = self.K_known_known_ldl
+        L = lu[perm, :]
+        print(L)
+        print(D != 0.0)
+        print(perm)
+        # P = self.np.eye(len(perm))[perm]
+
         return (
             scipy.linalg.solve_triangular(
-                self.K_known_known_cholesky.T,
+                L,
                 scipy.linalg.solve_triangular(
-                    self.K_known_known_cholesky,
-                    self.condition_values,
-                    lower=True,
-                ),
-                lower=False,
+                    L, self.condition_values[perm], lower=True
+                )
+                / self.np.diag(D),
+                lower=True,
+                trans="T",
             )
-            if self.kernel.is_covariance_function
-            else None
-        )
+        )[self.np.argsort(perm)]
+
+    def _compute_qr_alpha(self):
+        if self.K_known_known is None:
+            return None
+
+        return self.K_known_known_qr_inv @ self.condition_values
+
+    def _compute_default_alpha(self):
+        if self.K_known_known is None:
+            return None
+
+        return self.K_known_known_inv @ self.condition_values
 
     def __init__(
         self,
@@ -343,14 +387,29 @@ class GaussianProcess:
         self.condition_values = self._compute_condition_values()
         """The values used to condition the GP"""
 
-        self.K_known_known_inv = self._compute_K_known_known_inv()
+        self.K_known_known_inv = None  # Not used
         """ndarray: The inverse of K_known_known"""
-
-        self.K_known_known_cholesky = self._compute_K_known_known_cholesky()
+        self.K_known_known_cholesky = None
         """ndarray: The cholesky decomposition of K_known_known"""
-
-        self.RW06_2_1_alpha = self._compute_RW06_2_1_alpha()
+        self.K_known_known_ldl = None
+        """(ndarray, ndarray, ndarray): The LDL.T decomposition of K_known_known with elements (lu, D, perm)"""
+        self.K_known_known_qr = None
+        """(ndarray, ndarray): The QR decomposition of K_known_known with elements (Q, R)"""
+        self.K_known_known_qr_inv = None
+        """(ndarray): The inverse computed via QR decomposition of K_known_known"""
+        self.RW06_2_1_alpha = None
         """ndarray: The alpha component of RW06 Algorithm 2.1"""
+
+        if self.kernel.is_covariance_function:
+            self.K_known_known_cholesky = self._compute_K_known_known_cholesky()
+            self.RW06_2_1_alpha = self._compute_cholesky_alpha()
+        elif self.kernel.is_symmetric:
+            self.K_known_known_ldl = self._compute_K_known_known_ldl()
+            self.RW06_2_1_alpha = self._compute_ldl_alpha()
+        else:
+            self.K_known_known_qr = self._compute_K_known_known_qr()
+            self.K_known_known_qr_inv = self._compute_K_known_known_qr_inv()
+            self.RW06_2_1_alpha = self._compute_qr_alpha()
 
     def _RW06_2_1(
         self, prior_mean: numpy.ndarray, K_x_x: numpy.ndarray, K_known_x: numpy.ndarray
@@ -447,7 +506,7 @@ class GaussianProcess:
 
         return mean, variance
 
-    def _evaluate_default(
+    def _evaluate__default(
         self,
         x: numpy.ndarray,
         K_x_x: numpy.ndarray,
@@ -464,23 +523,35 @@ class GaussianProcess:
         Returns:
             (ndarray, ndarray): mean and covariance matrix at x
         """
-        return self._mean_default(x, K_x_known=K_x_known), self.np.diag(
-            self._covariance_default(
+        return self._mean__default(x, K_x_known=K_x_known), self.np.diag(
+            self._covariance__default(
                 K_x_x=K_x_x, K_x_known=K_x_known, K_known_x=K_known_x
             )
         )
 
-    def _evaluate_symmetric_kernel(
+    def _evaluate__qr(
+        self,
+        x: numpy.ndarray,
+        K_x_x: numpy.ndarray,
+        K_x_known: numpy.ndarray,
+        K_known_x: numpy.ndarray,
+    ) -> tuple[numpy.ndarray, numpy.ndarray]:
+        return self._mean__alpha(x, K_x_known=K_x_known), self.np.diag(
+            self._covariance__qr(K_x_x=K_x_x, K_x_known=K_x_known, K_known_x=K_known_x)
+        )
+
+    def _evaluate__ldl(
         self,
         x: numpy.ndarray,
         K_x_x: numpy.ndarray,
         K_x_known: numpy.ndarray,
     ):
-        return self._mean_default(x, K_x_known=K_x_known), self.np.diag(
-            self._covariance_symmetric_kernel(K_x_x=K_x_x, K_x_known=K_x_known)
+        return (
+            self._mean__alpha(x, K_x_known=K_x_known),
+            self.np.diag(self._covariance__ldl(K_x_x=K_x_x, K_x_known=K_x_known)),
         )
 
-    def _evaluate__covariance_kernel(
+    def _evaluate__cholesky(
         self, x: numpy.ndarray, K_x_x: numpy.ndarray, K_x_known: numpy.ndarray
     ) -> tuple[numpy.ndarray, numpy.ndarray]:
         """Evaluate the mean and variance of the Gaussian Process at x
@@ -493,8 +564,8 @@ class GaussianProcess:
         Returns:
             (ndarray, ndarray): mean and covariance matrix at x
         """
-        return self._mean__covariance_kernel(x, K_x_known=K_x_known), self.np.diag(
-            self._covariance__covariance_kernel(K_x_x=K_x_x, K_x_known=K_x_known)
+        return self._mean__alpha(x, K_x_known=K_x_known), self.np.diag(
+            self._covariance__cholesky(K_x_x=K_x_x, K_x_known=K_x_known)
         )
 
     def evaluate(
@@ -517,19 +588,17 @@ class GaussianProcess:
         K_x_x = value_or_func(K_x_x, self._compute_K_x_x, x)
         K_x_known = value_or_func(K_x_known, self._compute_K_x_known, x)
         if self.kernel.is_covariance_function:
-            return self._evaluate__covariance_kernel(
-                x, K_x_x=K_x_x, K_x_known=K_x_known
-            )
+            return self._evaluate__cholesky(x, K_x_x=K_x_x, K_x_known=K_x_known)
         if self.kernel.is_symmetric:
-            return self._evaluate_symmetric_kernel(x, K_x_x=K_x_x, K_x_known=K_x_known)
-        return self._evaluate_default(
+            return self._evaluate__ldl(x, K_x_x=K_x_x, K_x_known=K_x_known)
+        return self._evaluate__qr(
             x,
             K_x_x=K_x_x,
             K_x_known=K_x_known,
             K_known_x=value_or_func(K_known_x, self._compute_K_known_x, x),
         )
 
-    def _mean_default(
+    def _mean__default(
         self, x: numpy.ndarray, K_x_known: numpy.ndarray
     ) -> numpy.ndarray:
         if self.x_known is None:  # GP is Prior
@@ -542,9 +611,7 @@ class GaussianProcess:
 
         return mean
 
-    def _mean__covariance_kernel(
-        self, x: numpy.ndarray, K_x_known: numpy.ndarray
-    ) -> numpy.ndarray:
+    def _mean__alpha(self, x: numpy.ndarray, K_x_known: numpy.ndarray) -> numpy.ndarray:
         if self.x_known is None:  # GP is Prior
             return self.prior_mean(x)
 
@@ -552,11 +619,9 @@ class GaussianProcess:
 
     def mean(self, x: numpy.ndarray, K_x_known: numpy.ndarray = None) -> numpy.ndarray:
         K_x_known = value_or_func(K_x_known, self._compute_K_x_known, x)
-        if self.kernel.is_covariance_function:
-            return self._mean__covariance_kernel(x, K_x_known=K_x_known)
-        return self._mean_default(x, K_x_known=K_x_known)
+        return self._mean__alpha(x, K_x_known=K_x_known)
 
-    def _covariance_default(
+    def _covariance__default(
         self,
         K_x_x: numpy.ndarray,
         K_x_known: numpy.ndarray,
@@ -567,15 +632,31 @@ class GaussianProcess:
 
         return K_x_x - K_x_known @ self.K_known_known_inv @ K_known_x
 
-    def _covariance_symmetric_kernel(
+    def _covariance__qr(
+        self,
+        K_x_x: numpy.ndarray,
+        K_x_known: numpy.ndarray,
+        K_known_x: numpy.ndarray,
+    ) -> numpy.ndarray:
+        if self.x_known is None:  # GP is Prior
+            return K_x_x
+
+        return K_x_x - K_x_known @ self.K_known_known_qr_inv @ K_known_x
+
+    def _covariance__ldl(
         self, K_x_x: numpy.ndarray, K_x_known: numpy.ndarray
     ) -> numpy.ndarray:
         if self.x_known is None:  # GP is Prior
             return K_x_x
 
-        return K_x_x - K_x_known @ self.K_known_known_inv @ K_x_known.T
+        lu, D, perm = self.K_known_known_ldl
+        L = lu[perm, :]
 
-    def _covariance__covariance_kernel(
+        v = scipy.linalg.solve_triangular(L, K_x_known.T[perm, :], lower=True)
+
+        return K_x_x - v.T / self.np.diag(D) @ v
+
+    def _covariance__cholesky(
         self, K_x_x: numpy.ndarray, K_x_known: numpy.ndarray
     ) -> numpy.ndarray:
         if self.x_known is None:  # GP is Prior
@@ -597,10 +678,10 @@ class GaussianProcess:
         K_x_x = value_or_func(K_x_x, self._compute_K_x_x, x)
         K_x_known = value_or_func(K_x_known, self._compute_K_x_known, x)
         if self.kernel.is_covariance_function:
-            return self._covariance__covariance_kernel(K_x_x=K_x_x, K_x_known=K_x_known)
+            return self._covariance__cholesky(K_x_x=K_x_x, K_x_known=K_x_known)
         if self.kernel.is_symmetric:
-            return self._covariance_symmetric_kernel(K_x_x=K_x_x, K_x_known=K_x_known)
-        return self._covariance_default(
+            return self._covariance__ldl(K_x_x=K_x_x, K_x_known=K_x_known)
+        return self._covariance__qr(
             K_x_x=K_x_x,
             K_x_known=K_x_known,
             K_known_x=value_or_func(K_known_x, self._compute_K_known_x, x),
@@ -624,7 +705,7 @@ class GaussianProcess:
         """See :func:`<GaussianProcess.evaluate>`"""
         return self.evaluate(x)
 
-    def _derivative_default(
+    def _derivative__default(
         self,
         x: numpy.ndarray,
         K_x_x_derivative_lhs: numpy.ndarray,
@@ -643,10 +724,10 @@ class GaussianProcess:
         Returns:
             (ndarray, ndarray): mean and covariance matrix at x
         """
-        return self._derivative_mean_default(
+        return self._derivative_mean__default(
             x, K_x_known_derivative_lhs=K_x_known_derivative_lhs
         ), self.np.diag(
-            self._derivative_covariance_default(
+            self._derivative_covariance__default(
                 K_x_x_derivative_lhs=K_x_x_derivative_lhs,
                 K_x_known=K_x_known,
                 K_known_x=K_known_x,
@@ -655,17 +736,48 @@ class GaussianProcess:
             )
         )
 
-    def _derivative_symmetric_kernel(
+    def _derivative__qr(
+        self,
+        x: numpy.ndarray,
+        K_x_x_derivative_lhs: numpy.ndarray,
+        K_x_known: numpy.ndarray,
+        K_known_x: numpy.ndarray,
+        K_x_known_derivative_lhs: numpy.ndarray,
+        K_known_x_derivative_rhs: numpy.ndarray,
+    ) -> tuple[numpy.ndarray, numpy.ndarray]:
+        """Evaluate the mean and covariance matrix of the derivative of the Gaussian Process
+
+        Uses the standard evaluation formula for Gaussian Process posteriors
+
+        Args:
+            x (ndarray): The point(s) at which to evaluate the mean and covariance matrix
+
+        Returns:
+            (ndarray, ndarray): mean and covariance matrix at x
+        """
+        return self._derivative_mean__alpha(
+            x, K_x_known_derivative_lhs=K_x_known_derivative_lhs
+        ), self.np.diag(
+            self._derivative_covariance__qr(
+                K_x_x_derivative_lhs=K_x_x_derivative_lhs,
+                K_x_known=K_x_known,
+                K_known_x=K_known_x,
+                K_x_known_derivative_lhs=K_x_known_derivative_lhs,
+                K_known_x_derivative_rhs=K_known_x_derivative_rhs,
+            )
+        )
+
+    def _derivative__ldl(
         self,
         x: numpy.ndarray,
         K_x_x_derivative_lhs: numpy.ndarray,
         K_x_known: numpy.ndarray,
         K_x_known_derivative_lhs: numpy.ndarray,
     ):
-        return self._derivative_mean_default(
+        return self._derivative_mean__alpha(
             x, K_x_known_derivative_lhs=K_x_known_derivative_lhs
         ), self.np.diag(
-            self._derivative_covariance_symmetric_kernel(
+            self._derivative_covariance__ldl(
                 K_x_x_derivative_lhs=K_x_x_derivative_lhs,
                 K_x_known=K_x_known,
                 K_x_known_derivative_lhs=K_x_known_derivative_lhs,
@@ -689,10 +801,10 @@ class GaussianProcess:
         Returns:
             (ndarray, ndarray): mean and covariance matrix at x
         """
-        return self._derivative_mean__covariance_kernel(
+        return self._derivative_mean__alpha(
             x, K_x_known_derivative_lhs=K_x_known_derivative_lhs
         ), self.np.diag(
-            self._derivative_covariance__covariance_kernel(
+            self._derivative_covariance__cholesky(
                 K_x_x_derivative_lhs=K_x_x_derivative_lhs,
                 K_x_known=K_x_known,
                 K_x_known_derivative_lhs=K_x_known_derivative_lhs,
@@ -735,13 +847,13 @@ class GaussianProcess:
                 K_x_known_derivative_lhs=K_x_known_derivative_lhs,
             )
         if self.kernel.is_symmetric:
-            return self._derivative_symmetric_kernel(
+            return self._derivative__ldl(
                 x,
                 K_x_x_derivative_lhs=K_x_x_derivative_lhs,
                 K_x_known=K_x_known,
                 K_x_known_derivative_lhs=K_x_known_derivative_lhs,
             )
-        return self._derivative_default(
+        return self._derivative__qr(
             x,
             K_x_x_derivative_lhs=K_x_x_derivative_lhs,
             K_x_known=K_x_known,
@@ -752,7 +864,7 @@ class GaussianProcess:
             ),
         )
 
-    def _derivative_mean_default(
+    def _derivative_mean__default(
         self, x: numpy.ndarray, K_x_known_derivative_lhs: numpy.ndarray
     ) -> numpy.ndarray:
         if self.x_known is None:  # GP is prior
@@ -765,7 +877,7 @@ class GaussianProcess:
 
         return derivative_mean
 
-    def _derivative_mean__covariance_kernel(
+    def _derivative_mean__alpha(
         self, x: numpy.ndarray, K_x_known_derivative_lhs: numpy.ndarray
     ) -> numpy.ndarray:
         if self.x_known is None:  # GP is prior
@@ -783,13 +895,11 @@ class GaussianProcess:
             K_x_known_derivative_lhs, self._compute_K_x_known_derivative_lhs, x
         )
 
-        return (
-            self._derivative_mean_default(x, K_x_known_derivative_lhs)
-            if not self.kernel.is_covariance_function
-            else self._derivative_mean__covariance_kernel(x, K_x_known_derivative_lhs)
+        return self._derivative_mean__alpha(
+            x, K_x_known_derivative_lhs=K_x_known_derivative_lhs
         )
 
-    def _derivative_covariance_default(
+    def _derivative_covariance__default(
         self,
         K_x_x_derivative_lhs: numpy.ndarray,
         K_x_known: numpy.ndarray,
@@ -806,7 +916,24 @@ class GaussianProcess:
             - K_x_known @ self.K_known_known_inv @ K_known_x_derivative_rhs
         )
 
-    def _derivative_covariance_symmetric_kernel(
+    def _derivative_covariance__qr(
+        self,
+        K_x_x_derivative_lhs: numpy.ndarray,
+        K_x_known: numpy.ndarray,
+        K_known_x: numpy.ndarray,
+        K_x_known_derivative_lhs: numpy.ndarray,
+        K_known_x_derivative_rhs: numpy.ndarray,
+    ) -> numpy.ndarray:
+        if self.x_known is None:  # GP is prior
+            return K_x_x_derivative_lhs
+
+        return (
+            K_x_x_derivative_lhs
+            - K_x_known_derivative_lhs @ self.K_known_known_qr_inv @ K_known_x
+            - K_x_known @ self.K_known_known_qr_inv @ K_known_x_derivative_rhs
+        )
+
+    def _derivative_covariance__ldl(
         self,
         K_x_x_derivative_lhs: numpy.ndarray,
         K_x_known: numpy.ndarray,
@@ -815,12 +942,17 @@ class GaussianProcess:
         if self.x_known is None:  # GP is prior
             return K_x_x_derivative_lhs
 
-        return (
-            K_x_x_derivative_lhs
-            - 2.0 * K_x_known_derivative_lhs @ self.K_known_known_inv @ K_x_known.T
-        )
+        lu, D, perm = self.K_known_known_ldl
+        L = lu[perm, :]
 
-    def _derivative_covariance__covariance_kernel(
+        v_l = scipy.linalg.solve_triangular(
+            L, K_x_known_derivative_lhs.T[perm, :], lower=True
+        )
+        v_r = scipy.linalg.solve_triangular(L, K_x_known.T[perm, :], lower=True)
+
+        return K_x_x_derivative_lhs - 2.0 * v_l.T / self.np.diag(D) @ v_r
+
+    def _derivative_covariance__cholesky(
         self,
         K_x_x_derivative_lhs: numpy.ndarray,
         K_x_known: numpy.ndarray,
@@ -858,18 +990,18 @@ class GaussianProcess:
         )
 
         if self.kernel.is_positive_definite:
-            return self._derivative_covariance__covariance_kernel(
+            return self._derivative_covariance__cholesky(
                 K_x_x_derivative_lhs=K_x_x_derivative_lhs,
                 K_x_known=K_x_known,
                 K_x_known_derivative_lhs=K_x_known_derivative_lhs,
             )
         if self.kernel.is_symmetric:
-            return self._derivative_covariance_symmetric_kernel(
+            return self._derivative_covariance__ldl(
                 K_x_x_derivative_lhs=K_x_x_derivative_lhs,
                 K_x_known=K_x_known,
                 K_x_known_derivative_lhs=K_x_known_derivative_lhs,
             )
-        return self._derivative_covariance_default(
+        return self._derivative_covariance__qr(
             K_x_x_derivative_lhs=K_x_x_derivative_lhs,
             K_x_known=K_x_known,
             K_known_x=value_or_func(K_known_x, self._compute_K_known_x, x),
@@ -937,7 +1069,7 @@ class GaussianProcess:
 
         return rng.multivariate_normal(mean, covariance).T
 
-    def log_marginal_likelihood_default(self) -> float:
+    def _log_marginal_likelihood__default(self) -> float:
         """Computes the log marginal likelihood of this Gaussian Process
 
         Uses the standard evaluation formula that calculates the determinant
@@ -956,7 +1088,26 @@ class GaussianProcess:
         t_2 = len(self.condition_values) * 0.5 * self.np.log(2 * self.np.pi)
         return -(t_0 + t_1 + t_2)
 
-    def log_marginal_likelihood_stable(self) -> float:
+    def _log_marginal_likelihood__qr(self) -> float:
+        Q, R = self.K_known_known_qr
+
+        t_0 = 0.5 * self.condition_values.T @ self.RW06_2_1_alpha
+        t_1 = 0.5 * self.np.sum(self.np.log(self.np.abs(self.np.diag(R))))
+        t_2 = len(self.condition_values) * 0.5 * self.np.log(2 * self.np.pi)
+        return -(t_0 + t_1 + t_2)
+
+    def _log_marginal_likelihood__ldl(self) -> float:
+        lu, D, perm = self.K_known_known_ldl
+        L = lu[perm, :]
+
+        t_0 = 0.5 * self.condition_values.T @ self.RW06_2_1_alpha
+        t_1 = self.np.sum(
+            self.np.log(self.np.abs(self.np.diag(L)))
+        ) + 0.5 * self.np.sum(self.np.log(self.np.diag(D)))
+        t_2 = len(self.condition_values) * 0.5 * self.np.log(2 * self.np.pi)
+        return -(t_0 + t_1 + t_2)
+
+    def _log_marginal_likelihood__cholesky(self) -> float:
         """Computes the log marginal likelihood of this Gaussian Process
 
         Uses cholesky decomposition to avoid calculating the determinant of K_known_known offering a more stable evaluation
@@ -978,11 +1129,11 @@ class GaussianProcess:
         Returns:
             The log marginal likelihood
         """
-        return (
-            self.log_marginal_likelihood_default()
-            if not self.kernel.is_covariance_function
-            else self.log_marginal_likelihood_stable()
-        )
+        if self.kernel.is_covariance_function:
+            return self._log_marginal_likelihood__cholesky()
+        if self.kernel.is_symmetric:
+            return self._log_marginal_likelihood__ldl()
+        return self._log_marginal_likelihood__qr()
 
     def f_error(self) -> float:
         """Computes the absolute error of the function values at the known positions."""
