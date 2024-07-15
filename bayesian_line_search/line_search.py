@@ -65,8 +65,8 @@ def normalization_parameters(f_known):
     return -lowest_f, 1.0
 
 
-def init_S_debug(step_max, np):
-    return np.linspace(start=0.0, stop=step_max, num=100)
+def init_S_debug(search_interval, np):
+    return np.linspace(start=search_interval[0], stop=search_interval[1], num=100)
 
 
 def print_debug_info(
@@ -170,21 +170,48 @@ def gp_line_search(
     d,
     d_norm,
     fg,
-    step_max,
+    search_interval: tuple[float, float],
     f_old,
     g_old,
     data_points: list[DataPoint],
     np: types.ModuleType,
     debug_options: LineSearchDebugOptions,
     max_sample_count: int,
-) -> any:
+) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, float, int, bool]:
+    """_summary_
+
+    Args:
+        x_old (_type_): _description_
+        d (_type_): _description_
+        d_norm (_type_): _description_
+        fg (_type_): _description_
+        search_interval (tuple[float, float]): _description_
+        f_old (_type_): _description_
+        g_old (_type_): _description_
+        data_points (list[DataPoint]): _description_
+        np (types.ModuleType): _description_
+        debug_options (LineSearchDebugOptions): _description_
+        max_sample_count (int): _description_
+
+    Returns:
+        tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, float, int, bool]: f, g, x, step, fun_eval, wolfe_met
+    """
+
     # Containers used for debug. Initialized just in time.
     S_debug = None
     f_debug = None
 
+    step_min = search_interval[0]
+    step_max = search_interval[1]
+    assert step_min < step_max  # TODO: Remove
+
     # Vectors to hold the information we have already queried previously
     step_known, f_known, g_known, step_g_known = zip(
-        *[(p.step, p.f, p.g, p.step_g) for p in data_points if p.step <= step_max]
+        *[
+            (p.step, p.f, p.g, p.step_g)
+            for p in data_points
+            if step_min <= p.step and p.step <= step_max
+        ]
     )
     step_known = np.array(step_known)
     f_known = np.array(f_known)
@@ -251,7 +278,7 @@ def gp_line_search(
                 and acquisitionFunction is not None
             ):
                 if S_debug is None:
-                    S_debug = init_S_debug(step_max, np)
+                    S_debug = init_S_debug(search_interval, np)
                     f_debug = np.array([fg(x_old + s * d)[0] for s in S_debug])
                 print_debug_info(
                     GP_posterior,
@@ -261,7 +288,7 @@ def gp_line_search(
                     (f_known + normalization_offset) * normalization_scale,
                     acquisitionFunction,
                 )
-            return f, g, x, step, fun_eval
+            return f, g, x, step, fun_eval, True
         if len(step_known) > max_sample_count:
             if debug_options.report_termination_reason:
                 print("Line search terminated due to exceeded sample count")
@@ -287,6 +314,7 @@ def gp_line_search(
             # step_max / (len(step_known) - 1),
             # statistics.mode([abs(a - b) for a, b in itertools.pairwise(step_known)])
             step_max
+            - step_min
         ]
 
         # Find length scale with best log marginal likelihood
@@ -298,7 +326,7 @@ def gp_line_search(
 
             l_posterior = None
             # Compute new posterior
-            noise = 1e-14 * step_max  # Initial noise relative to x
+            noise = 1e-14 * (step_max - step_min)  # Initial noise relative to x
             while True:
                 try:
                     l_posterior = GaussianProcess(
@@ -334,7 +362,7 @@ def gp_line_search(
         acquisitionOptimizer = DIRECT_LBFGSB_AcquisitionOptimizer()
         step = acquisitionOptimizer.maximize(
             acquisitionFunction,
-            0.0,
+            step_min,
             step_max,
             step_known,
         )
@@ -348,7 +376,7 @@ def gp_line_search(
             and acquisitionFunction is not None
         ):
             if S_debug is None:
-                S_debug = init_S_debug(step_max, np)
+                S_debug = init_S_debug(search_interval, np)
                 f_debug = np.array([fg(x_old + s * d)[0] for s in S_debug])
             print_debug_info(
                 GP_posterior,
@@ -367,7 +395,7 @@ def gp_line_search(
         and acquisitionFunction is not None
     ):
         if S_debug is None:
-            S_debug = init_S_debug(step_max, np)
+            S_debug = init_S_debug(search_interval, np)
             f_debug = np.array([fg(x_old + s * d)[0] for s in S_debug])
         print_debug_info(
             GP_posterior,
@@ -385,7 +413,7 @@ def gp_line_search(
     if debug_options.report_return_value:
         print(f"Best step at {step} with f={f}")
 
-    return f, g, x, step, fun_eval
+    return f, g, x, step, fun_eval, False
 
 
 def line_search(
@@ -436,7 +464,8 @@ def line_search(
             False
         ), f"Descent direction should be descent direction. Directional gradient was {dg} in direction {d}"
 
-    step_max = min(float(step_max), 1.0)
+    step_min = 0.0
+    step_max = min(float(step_max), 1.0)  # Start initially with at most 1.0
 
     total_fun_eval = 0
 
@@ -447,12 +476,12 @@ def line_search(
     data_points = [DataPoint(0.0, x_old, f_old, g_old, np.dot(g_old, d_norm))]
 
     while True:
-        f, g, x, step, fun_eval = gp_line_search(
+        f, g, x, step, fun_eval, wolfe_met = gp_line_search(
             x_old,
             d,
             d_norm,
             fg,
-            step_max,
+            (step_min, step_max),
             f_old,
             g_old,
             data_points,
@@ -463,11 +492,18 @@ def line_search(
 
         total_fun_eval += fun_eval
 
+        if wolfe_met:
+            if debug_options.report_termination_reason:
+                print(f"Wolfe after {k} iterations")
+            return f, g, x, step, total_fun_eval
+
         # Stop if any of the termination conditions are met
-        if step is not None:
-            if (x == x_old).all(): # Step is to small to change x
+        if step is not None and step != step_max:
+            if (x == x_old).all():  # Step is to small to change x
                 if debug_options.report_termination_reason:
-                    print(f"Terminated due insufficient precision of problem after {k} iterations")
+                    print(
+                        f"Terminated due insufficient precision of problem after {k} iterations"
+                    )
                 return f_old, g_old, x_old, None, total_fun_eval
 
             if debug_options.report_termination_reason:
@@ -476,20 +512,35 @@ def line_search(
                 )
 
             return f, g, x, step, total_fun_eval
-        
+
         if k > max_iter:
             if debug_options.report_termination_reason:
                 print("Terminated line search due to exceeded iteration count")
             return f, g, x, step, total_fun_eval
 
-        # Half the search area, since gp_line search could not find step on current search area (too big, this large instability or thorough search)
-        # TODO: Reduce area to be around best value found yet maybe
-        data_points.sort(key=lambda d: d.step)
-        step_max *= min(
-            data_points[5].step if len(data_points) > 5 else step_max, step_max * 0.5
-        )
-        
-        if debug_options.report_area_reduction:
-            print(f"Could not find step. Restarting with step_max={step_max}")
-            
+        if step is not None and step == step_max:
+            # Double the search are, since the Bayesian optimization expects the optimum to be past step_max
+            step_min = step_max
+            step_max *= 2.0
+
+            if debug_options.report_area_reduction:
+                print(
+                    f"Minimum seems to be past step_max. Restarting with search_interval={(step_min, step_max)}"
+                )
+        else:
+            # Reduce the search area, since gp_line search could not find step on current search area (too big, this large instability or thorough search)
+            # TODO: Reduce area to be around best value found yet maybe
+            data_points.sort(key=lambda d: d.step)
+            assert step_min == 0.0
+            # No need to consider step_min here, since we will never decrease step_max if step_min is not 0.0
+            step_max *= min(
+                data_points[5].step if len(data_points) > 5 else step_max,
+                step_max * 0.5,
+            )
+
+            if debug_options.report_area_reduction:
+                print(
+                    f"Could not find step. Restarting with search_interval={(step_min, step_max)}"
+                )
+
         k += 1
