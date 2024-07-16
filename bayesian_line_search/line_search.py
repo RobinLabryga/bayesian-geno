@@ -165,6 +165,10 @@ def find_best_step(x_old, f_old, g_old, d, step_known, f_known, g_known, np):
         return f_old, g_old, x_old, None
 
     x = x_old + step * d
+
+    if (x == x_old).all():  # step too small to change x
+        return f_old, g_old, x_old, None
+
     f = f_known[largest_step_with_smallest_value_index]
     g = g_known[largest_step_with_smallest_value_index]
 
@@ -535,13 +539,6 @@ def line_search(
 
         # Stop if any of the termination conditions are met
         if step is not None and step != step_max:
-            if (x == x_old).all():  # Step is to small to change x
-                if debug_options.report_termination_reason:
-                    print(
-                        f"Terminated due insufficient precision of problem after {k} iterations"
-                    )
-                return f_old, g_old, x_old, None, total_fun_eval
-
             if debug_options.report_termination_reason:
                 print(
                     f"Terminated line search due to {'better' if f < f_old else 'equal'} value found after {k} iterations"
