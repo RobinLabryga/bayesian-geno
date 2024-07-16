@@ -108,6 +108,12 @@ class DataPoint:
         self.g = g
         self.step_g = step_g
 
+    def __str__(self) -> str:
+        return f"s={self.step}, f={self.f}"
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
 
 def find_best_data_point(data_points: list[DataPoint]):
     best = None
@@ -563,7 +569,7 @@ def line_search(
             data_points.sort(key=lambda d: d.step)
             assert step_min == 0.0
             # No need to consider step_min here, since we will never decrease step_max if step_min is not 0.0
-            step_max *= min(
+            step_max = min(
                 data_points[5].step if len(data_points) > 5 else step_max,
                 step_max * 0.5,
             )
