@@ -165,6 +165,19 @@ def find_best_step(x_old, f_old, g_old, d, step_known, f_known, g_known, np):
     return f, g, x, step
 
 
+def return_best_step(
+    x_old, f_old, g_old, d, step_known, f_known, g_known, fun_eval, np, debug_options
+):
+    f, g, x, step = find_best_step(
+        x_old, f_old, g_old, d, step_known, f_known, g_known, np
+    )
+
+    if debug_options.report_return_value:
+        print(f"Best step at {step} with f={f}")
+
+    return f, g, x, step, fun_eval, False
+
+
 def gp_line_search(
     x_old,
     d,
@@ -217,6 +230,19 @@ def gp_line_search(
     f_known = np.array(f_known)
     g_known = list(g_known)
     step_g_known = np.array(step_g_known)
+
+    if not np.isfinite(f_known).all():
+        if debug_options.report_invalid_f:
+            print(
+                f"Known fs in search interval contained invalid value f_known={f_known}"
+            )
+        if debug_options.report_termination_reason:
+            print(f"Line search terminated due to condition value not finite")
+
+        # Let caller decide how to change search area
+        return return_best_step(
+            x_old, f_old, g_old, d, step_known, f_known, g_known, 0, np, debug_options
+        )
 
     step = step_max  # We start at the max step size
 
@@ -406,14 +432,18 @@ def gp_line_search(
             acquisitionFunction,
         )
 
-    f, g, x, step = find_best_step(
-        x_old, f_old, g_old, d, step_known, f_known, g_known, np
+    return return_best_step(
+        x_old,
+        f_old,
+        g_old,
+        d,
+        step_known,
+        f_known,
+        g_known,
+        fun_eval,
+        np,
+        debug_options,
     )
-
-    if debug_options.report_return_value:
-        print(f"Best step at {step} with f={f}")
-
-    return f, g, x, step, fun_eval, False
 
 
 def line_search(
