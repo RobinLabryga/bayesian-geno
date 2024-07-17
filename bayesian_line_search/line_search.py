@@ -97,7 +97,7 @@ def print_debug_info(
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True)
     gp.plot_objective(ax1, S_debug, f_debug, step_known, f_known)
     gp.plot_gp(ax1, S_debug, pred.mean, pred.std_deviation, drawStd=False)
-    gp.plot_objective(ax2, S_debug, f_debug, step_known, f_known)
+    gp.plot_observations(ax2, step_known, f_known)
     gp.plot_gp(ax2, S_debug, pred.mean, pred.std_deviation)
 
     ax3.plot(S_debug, [acquisitionFunction(s) for s in S_debug], label="Acquisition")
