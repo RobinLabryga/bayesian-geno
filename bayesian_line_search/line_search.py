@@ -577,7 +577,7 @@ def line_search(
             assert step_min == 0.0
             # No need to consider step_min here, since we will never decrease step_max if step_min is not 0.0
             step_max = min(
-                data_points[5].step if len(data_points) > 5 else step_max,
+                data_points[4].step if len(data_points) > 4 else step_max,
                 step_max * 0.5,
             )
 
