@@ -309,6 +309,14 @@ def gp_line_search(
                 if debug_options.report_termination_reason:
                     print(f"Line search terminated due to condition value not finite")
                 break  # Let caller decide how to change search area
+            elif not np.isfinite(step_g):
+                if debug_options.report_invalid_f:
+                    print(
+                        f"Encountered step_g={step_g} at step={step}, which can not be used for Gaussian Process. g={g}"
+                    )
+                if debug_options.report_termination_reason:
+                    print(f"Line search terminated due to condition value not finite")
+                break
             else:
                 # Update known information
                 step_known = np.append(step_known, step)
