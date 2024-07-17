@@ -21,6 +21,7 @@ class LineSearchDebugOptions:
     def __init__(
         self,
         report_termination_reason: bool = False,
+        report_wolfe_termination: bool = False,
         report_return_value: bool = False,
         report_insufficient_acquisition: bool = False,
         report_invalid_f: bool = False,
@@ -35,6 +36,7 @@ class LineSearchDebugOptions:
 
         Args:
             report_termination_reason (bool, optional): False if no info about the reason for termination should be reported. Defaults to False.
+            report_termination_reason (bool, optional): True to report if a point satisfying the wolfe condition is returned. Defaults to False
             report_return_value (bool, optional): True if the step and function value that are being returned should be reported. Defaults to False.
             report_insufficient_acquisition (bool, optional): False if no info about failure to find unique new step should be reported. Defaults to False.
             report_invalid_f (bool, optional): False if no info about invalid function values (inf, nan) should be reported. Defaults to False.
@@ -44,6 +46,7 @@ class LineSearchDebugOptions:
             plot_threshold (int, optional). The iteration after which every iteration should be plotted. Ignored if plot_gp is False. The last iteration is plotted as long as plot_pg is True. Defaults to 1000.
         """
         self.report_termination_reason = report_termination_reason
+        self.report_wolfe_termination = report_wolfe_termination
         self.report_return_value = report_return_value
         self.report_insufficient_acquisition = report_insufficient_acquisition
         self.report_invalid_f = report_invalid_f
@@ -533,13 +536,13 @@ def line_search(
         total_fun_eval += fun_eval
 
         if wolfe_met:
-            if debug_options.report_termination_reason:
+            if debug_options.report_wolfe_termination:
                 print(f"Wolfe after {k} iterations")
             return f, g, x, step, total_fun_eval
 
         # Stop if any of the termination conditions are met
         if step is not None and step != step_max:
-            if debug_options.report_termination_reason:
+            if debug_options.report_wolfe_termination:
                 print(
                     f"Terminated line search due to {'better' if f < f_old else 'equal'} value found after {k} iterations"
                 )
@@ -547,7 +550,7 @@ def line_search(
             return f, g, x, step, total_fun_eval
 
         if k > max_iter:
-            if debug_options.report_termination_reason:
+            if debug_options.report_wolfe_termination:
                 print("Terminated line search due to exceeded iteration count")
             return f, g, x, step, total_fun_eval
 
