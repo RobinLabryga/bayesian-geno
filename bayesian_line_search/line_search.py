@@ -439,7 +439,7 @@ def gp_line_search(
 
         k += 1
 
-    if debug_options.plot_gp:
+    if debug_options.plot_gp and len(step_known) > 1:
         if S_debug is None:
             S_debug = init_S_debug(search_interval, np)
             f_debug = np.array([fg(x_old + s * d)[0] for s in S_debug])
