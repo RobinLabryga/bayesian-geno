@@ -82,6 +82,16 @@ def print_debug_info(
 ) -> None:
     import matplotlib.pyplot as plt
 
+    if GP_posterior is None:
+        fig, ax1 = plt.subplots(1, 1, sharex=True)
+        gp.plot_objective(ax1, S_debug, f_debug, step_known, f_known)
+
+        gp.plot_label(ax1, f"{len(step_known)} data points")
+        plt.show()
+        return
+
+    assert acquisitionFunction is not None
+
     pred = GPPrediction(S_debug, GP_posterior)
 
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True)
@@ -262,6 +272,8 @@ def gp_line_search(
     k = 0  # Count how many iterations of line search were performed
     fun_eval = 0  # Count how many times the function was evaluated
 
+    normalization_offset, normalization_scale = 0.0, 1.0
+
     GP_posterior = None
     acquisitionFunction = None
 
@@ -311,11 +323,7 @@ def gp_line_search(
                 print(
                     f"Line search terminated due to strong Wolfe condition after {k} sample iterations with {step}"
                 )
-            if (
-                debug_options.plot_gp
-                and GP_posterior is not None
-                and acquisitionFunction is not None
-            ):
+            if debug_options.plot_gp:
                 if S_debug is None:
                     S_debug = init_S_debug(search_interval, np)
                     f_debug = np.array([fg(x_old + s * d)[0] for s in S_debug])
@@ -408,12 +416,7 @@ def gp_line_search(
 
         if debug_options.report_acquisition_max:
             print(f"Maximized acquisition function at {step}")
-        if (
-            debug_options.plot_gp
-            and k >= debug_options.plot_threshold
-            and GP_posterior is not None
-            and acquisitionFunction is not None
-        ):
+        if debug_options.plot_gp and k >= debug_options.plot_threshold:
             if S_debug is None:
                 S_debug = init_S_debug(search_interval, np)
                 f_debug = np.array([fg(x_old + s * d)[0] for s in S_debug])
@@ -428,11 +431,7 @@ def gp_line_search(
 
         k += 1
 
-    if (
-        debug_options.plot_gp
-        and GP_posterior is not None
-        and acquisitionFunction is not None
-    ):
+    if debug_options.plot_gp:
         if S_debug is None:
             S_debug = init_S_debug(search_interval, np)
             f_debug = np.array([fg(x_old + s * d)[0] for s in S_debug])
