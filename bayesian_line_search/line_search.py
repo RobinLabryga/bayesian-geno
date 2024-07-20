@@ -9,9 +9,7 @@ from acquisition import (
     AcquisitionFunction,
     LowerConfidenceBound,
 )
-from acquisition.optimization import (
-    DIRECT_LBFGSB_AcquisitionOptimizer,
-)
+from acquisition.optimization import DIRECT_LBFGSB_AcquisitionOptimizer
 from gaussian_process.prior_mean import ZeroMean
 
 from util import value_or_value, value_or_func
@@ -128,12 +126,18 @@ class DataPoint:
         return self.__str__()
 
 
-def find_best_data_point(data_points: list[DataPoint]):
+def find_best_data_point(data_points: list[DataPoint], np):
     best = None
     for data_point in data_points:
-        if best is None or data_point.f < best.f:
+        if best is None or data_point.f < best.f or data_point.f <= best.f and data_point.step > best.step:
             best = data_point
-    return data_point
+
+    data_point_old = data_points[0]
+
+    if (data_point_old.x == best.x).all():  # step too small to change x
+        return data_point_old
+    
+    return best
 
 
 def wolfe_one_met(f, step, d, f_old, g_old, c):
@@ -239,7 +243,7 @@ def gp_line_search(
 
     step_min = search_interval[0]
     step_max = search_interval[1]
-    assert step_min < step_max  # TODO: Remove
+    assert step_min < step_max, f"{step_min} >= {step_max}"  # TODO: Remove
 
     # Vectors to hold the information we have already queried previously
     step_known, f_known, g_known, step_g_known = zip(
@@ -548,18 +552,11 @@ def line_search(
             return f, g, x, step, total_fun_eval
 
         # Stop if any of the termination conditions are met
-        if step is not None and step != step_max:
-            if debug_options.report_wolfe_termination:
-                print(
-                    f"Terminated line search due to {'better' if f < f_old else 'equal'} value found after {k} iterations"
-                )
-
-            return f, g, x, step, total_fun_eval
-
         if k > max_iter:
             if debug_options.report_wolfe_termination:
                 print("Terminated line search due to exceeded iteration count")
-            return f, g, x, step, total_fun_eval
+            best_data_point = find_best_data_point(data_points, np)
+            return best_data_point.f, best_data_point.g, best_data_point.x, best_data_point.step, total_fun_eval
 
         if step is not None and step == step_max:
             # Double the search are, since the Bayesian optimization expects the optimum to be past step_max
@@ -570,15 +567,14 @@ def line_search(
                 print(
                     f"Minimum seems to be past step_max. Restarting with search_interval={(step_min, step_max)}"
                 )
-        else:
-            # Reduce the search area, since gp_line search could not find step on current search area (too big, this large instability or thorough search)
+        else: # None or step < step_max which is a better point that does not satisfy the strong wolfe condition
+            # Reduce the search area, since gp_line search could not find step on current search area (too big, thus large instability or thorough search)
             # TODO: Reduce area to be around best value found yet maybe
-            data_points.sort(key=lambda d: d.step)
-            assert step_min == 0.0
-            # No need to consider step_min here, since we will never decrease step_max if step_min is not 0.0
+            data_points_in_interval = [d for d in data_points if step_min <= d.step and d.step <= step_max]
+            data_points_in_interval.sort(key=lambda d:d.step)
             step_max = min(
-                data_points[4].step if len(data_points) > 4 else step_max,
-                step_max * 0.5,
+                data_points_in_interval[4].step if len(data_points_in_interval) > 4 else step_max,
+                (step_min + step_max) * 0.5,
             )
 
             if debug_options.report_area_reduction:
