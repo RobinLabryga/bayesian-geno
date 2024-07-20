@@ -17,6 +17,12 @@ class AcquisitionOptimizer:
     ) -> float:
         assert False, "Not implemented"
 
+class HalfWayAcquisitionOptimizer(AcquisitionOptimizer):
+    def maximize(self, acquisition: AcquisitionFunction, lower_bound: float, upper_bound: float, x_known) -> float:
+        half_way_points = np.array([(a+b)*0.5 for a,b in itertools.pairwise(sorted(x_known))])
+        points_to_check = np.append(x_known, half_way_points)
+        acq = acquisition(points_to_check)
+        return points_to_check[np.argmax(acq)].item()
 
 class GradientBinarySearchAcquisitionOptimizer(AcquisitionOptimizer):
     def maximize(
