@@ -532,7 +532,7 @@ class Matern2_5Kernel(CovarianceFunction):
         r = self.np.abs(d)
         t0 = sr5 * r / l
         ex = self.np.exp(-t0)
-        return -5 / (3 * l**2) * ex * ((5 * r**2) / l**2 - t0 - 1)
+        return -5 / (3 * l**2) * ex * (t0**2 - t0 - 1)
 
 
 class ConstantKernel(CovarianceFunction):
