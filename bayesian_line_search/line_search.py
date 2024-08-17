@@ -61,8 +61,10 @@ def normalization_parameters(f_known):
     return -lowest_f, 1.0
 
 
-def init_S_debug(search_interval, np):
-    return np.linspace(start=search_interval[0], stop=search_interval[1], num=100)
+def init_debug(search_interval, fg, np):
+    S_debug = np.linspace(start=search_interval[0], stop=search_interval[1], num=100)
+    f_debug = np.array([fg(s)[0] for s in S_debug])
+    return S_debug, f_debug
 
 
 def print_debug_info(
@@ -107,12 +109,11 @@ def print_debug_info(
 
 
 class DataPoint:
-    def __init__(self, step, x, f, g, step_g) -> types.NoneType:
+    def __init__(self, step, x, f, g) -> types.NoneType:
         self.step = step
         self.x = x
         self.f = f
         self.g = g
-        self.step_g = step_g
 
     def __str__(self) -> str:
         return f"s={self.step}, f={self.f}"
@@ -121,109 +122,118 @@ class DataPoint:
         return self.__str__()
 
 
-def find_best_data_point(data_points: list[DataPoint], np):
-    best = None
-    for data_point in data_points:
-        if (
-            best is None
-            or data_point.f < best.f
-            or data_point.f <= best.f
-            and data_point.step > best.step
-        ):
-            best = data_point
+class LineSearchFunctionWrapper:
+    def __init__(
+        self, fg, x0, f0, g0, d, np=None, wolfe_c1=1.0e-4, wolfe_c2=0.9
+    ) -> None:
+        self.np = value_or_value(np, numpy)
+        self.__fg = fg
+        self.x0 = x0
+        self.f0 = f0
+        self.dg0 = d.T @ g0
+        self.d = d
+        self.__wolfe_c1 = wolfe_c1
+        self.__wolfe_c2 = wolfe_c2
+        self.__data_points = {0.0: DataPoint(0.0, x0, f0, g0)}
+        self.fun_eval = 0
 
-    data_point_old = data_points[0]
+    def data_point(self, step):
+        assert step in self.__data_points
+        return self.__data_points[step]
 
-    if (data_point_old.x == best.x).all():  # step too small to change x
-        return data_point_old
+    def x(self, step):
+        return self.x0 + step * self.d
 
-    return best
+    def fg(self, step):
+        if step not in self.__data_points:
+            # TODO: Check if x already exists to avoid duplicate evaluation for case where step too small to change x numerically
+            x = self.x(step)
+            f, g = self.__fg(x)
+            self.fun_eval += 1
+            self.__data_points[step] = DataPoint(step, x, f, g)
+        data_point = self.__data_points[step]
+        return data_point.f, data_point.g
+
+    def phi(self, step):
+        f, g = self.fg(step)
+        return f, self.d.T @ g
+
+    def psi(self, step):
+        phi_0_f, phi_0_g = self.f0, self.dg0
+        phi_f, phi_g = self.phi(step)
+        return (
+            phi_f - (phi_0_f + self.__wolfe_c1 * self.dg0 * step),
+            phi_g - self.__wolfe_c1 * phi_0_g,
+        )
+
+    def known_steps(self):
+        return self.__data_points.keys()
+
+    def find_best_data_point(self):
+        best = None
+        for data_point in self.__data_points:
+            if (
+                best is None
+                or data_point.f < best.f
+                or data_point.f <= best.f
+                and data_point.step > best.step
+            ):
+                best = data_point
+
+        data_point_old = self.__data_points[0]
+
+        if (data_point_old.x == best.x).all():  # step too small to change x
+            return data_point_old
+
+        return best
+
+    def wolfe_one_met(self, step):
+        f, g = self.fg(step)
+        return f <= self.f0 + self.__wolfe_c1 * step * self.dg0
+
+    def wolfe_two_met(self, step):
+        f, g = self.fg(step)
+        return -self.d.T @ g <= -self.__wolfe_c2 * self.dg0
+
+    def wolfe_three_met(self, step):
+        f, g = self.fg(step)
+        return self.np.abs(self.d.T @ g) <= self.__wolfe_c2 * self.np.abs(self.dg0)
+
+    def wolfe_condition_met(self, step):
+        return self.wolfe_one_met(step) and self.wolfe_two_met(step)
+
+    def strong_wolfe_condition_met(self, step):
+        return self.wolfe_one_met(step) and self.wolfe_three_met(step)
 
 
-def wolfe_one_met(f, step, d, f_old, g_old, c):
-    return f <= f_old + c * step * d.T @ g_old
-
-
-def wolfe_two_met(g, d, g_old, c):
-    return -d.T @ g <= -c * d.T @ g_old
-
-
-def wolfe_three_met(g, d, g_old, c, np):
-    return np.abs(d.T @ g) <= c * np.abs(d.T @ g_old)
-
-
-def wolfe_condition_met(f, g, step, d, f_old, g_old, np, c1=1.0e-4, c2=0.9):
-    return wolfe_one_met(f, step, d, f_old, g_old, c1) and wolfe_two_met(
-        g, d, g_old, c2
-    )
-
-
-def strong_wolfe_condition_met(f, g, step, d, f_old, g_old, np, c1=1.0e-4, c2=0.9):
-    return wolfe_one_met(f, step, d, f_old, g_old, c1) and wolfe_three_met(
-        g, d, g_old, c2, np
-    )
-
-
-def line_search_condition_met(f, f_old, step, dg):
-    alpha = 0.1
-    return f <= f_old + alpha * step * dg
-
-
-def find_best_step(x_old, f_old, g_old, d, step_known, f_known, g_known, np):
+def find_best_step(step_known, f_known, np):
     # TODO: Maybe return best of posterior mean instead (literature has some info)
 
     smallest_value_indices = np.nonzero(f_known == np.min(f_known))[0]
     largest_step_with_smallest_value_index = smallest_value_indices[
         np.argmax(step_known[smallest_value_indices])
     ]
-    step = step_known[largest_step_with_smallest_value_index]
-
-    if step == 0.0:
-        return f_old, g_old, x_old, None
-
-    x = x_old + step * d
-
-    if (x == x_old).all():  # step too small to change x
-        return f_old, g_old, x_old, None
-
-    f = f_known[largest_step_with_smallest_value_index]
-    g = g_known[largest_step_with_smallest_value_index]
-
-    return f, g, x, step
+    return step_known[largest_step_with_smallest_value_index]
 
 
-def return_best_step(
-    x_old, f_old, g_old, d, step_known, f_known, g_known, fun_eval, np, debug_options
-):
-    f, g, x, step = find_best_step(
-        x_old, f_old, g_old, d, step_known, f_known, g_known, np
-    )
-
-    if debug_options.report_return_value:
-        print(f"Best step at {step} with f={f}")
-
-    return f, g, x, step, fun_eval, False
+def return_best_step(step_known, f_known, np):
+    return find_best_step(step_known, f_known, np), False
 
 
 def gp_line_search(
-    x_old,
-    d,
-    d_norm,
     fg,
     search_interval: tuple[float, float],
-    f_old,
-    g_old,
-    data_points: list[DataPoint],
+    step_known,
+    wolfe_condition_met,
     np: types.ModuleType,
     debug_options: LineSearchDebugOptions,
     max_sample_count: int,
-) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, float, int, bool]:
+) -> tuple[float, bool]:
     """_summary_
 
     Args:
         x_old (_type_): _description_
         d (_type_): _description_
-        d_norm (_type_): _description_
         fg (_type_): _description_
         search_interval (tuple[float, float]): _description_
         f_old (_type_): _description_
@@ -234,8 +244,10 @@ def gp_line_search(
         max_sample_count (int): _description_
 
     Returns:
-        tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray, float, int, bool]: f, g, x, step, fun_eval, wolfe_met
+        tuple[float, int, bool]: step, wolfe_met
     """
+
+    # TODO: Require step and step max present and finite
 
     # Containers used for debug. Initialized just in time.
     S_debug = None
@@ -243,22 +255,22 @@ def gp_line_search(
 
     step_min = search_interval[0]
     step_max = search_interval[1]
-    assert step_min < step_max, f"{step_min} >= {step_max}"  # TODO: Remove
+    assert step_min < step_max, f"{step_min} >= {step_max}"
 
     # Vectors to hold the information we have already queried previously
-    step_known, f_known, g_known, step_g_known = zip(
+    step_known, f_known, g_known = zip(
         *[
-            (p.step, p.f, p.g, p.step_g)
-            for p in data_points
-            if step_min <= p.step and p.step <= step_max
+            (step, *fg(step))
+            for step in step_known
+            if step_min <= step and step <= step_max
         ]
     )
     step_known = np.array(step_known)
     f_known = np.array(f_known)
-    g_known = list(g_known)
-    step_g_known = np.array(step_g_known)
+    g_known = np.array(g_known)
 
     if not np.isfinite(f_known).all():
+        # TODO: On -inf return
         if debug_options.report_invalid_f:
             print(
                 f"Known fs in search interval contained invalid value f_known={f_known}"
@@ -267,16 +279,13 @@ def gp_line_search(
             print(f"Line search terminated due to condition value not finite")
 
         # Let caller decide how to change search area
-        return return_best_step(
-            x_old, f_old, g_old, d, step_known, f_known, g_known, 0, np, debug_options
-        )
+        return return_best_step(step_known, f_known, np)
 
     step = step_max  # We start at the max step size
 
     f_best = min(f_known)
 
     k = 0  # Count how many iterations of line search were performed
-    fun_eval = 0  # Count how many times the function was evaluated
 
     normalization_offset, normalization_scale = 0.0, 1.0
 
@@ -285,7 +294,6 @@ def gp_line_search(
 
     while True:
         # TODO: Reuse old GP if nothing but k changed
-        x = x_old + step * d
 
         if step in step_known:
             if k != 0:
@@ -299,15 +307,12 @@ def gp_line_search(
 
             s_index = np.where(step_known == step)[0][0]
             f = f_known[s_index]
-            g = g_known[s_index]
-            step_g = step_g_known[s_index]
+            step_g = g_known[s_index]
         else:  # New step
-            f, g = fg(x)
-            step_g = np.dot(g, d_norm)
-            data_points.append(DataPoint(step, x, f, g, step_g))
-            fun_eval += 1
+            f, step_g = fg(step)
 
             if not np.isfinite(f):
+                # TODO: On -inf return
                 if debug_options.report_invalid_f:
                     print(
                         f"Encountered f={f} at step={step}, which can not be used for Gaussian Process"
@@ -327,20 +332,17 @@ def gp_line_search(
                 # Update known information
                 step_known = np.append(step_known, step)
                 f_known = np.append(f_known, f)
-                g_known.append(g)
-                step_g_known = np.append(step_g_known, step_g)
+                g_known = np.append(g_known, step_g)
 
         # Quit if any of the quit conditions are met
-        if f <= f_best and strong_wolfe_condition_met(f, g, step, d, f_old, g_old, np):
-            # TODO: Make parameter if strong or normal wolfe condition
+        if f <= f_best and wolfe_condition_met(step):
             if debug_options.report_termination_reason:
                 print(
                     f"Line search terminated due to strong Wolfe condition after {k} sample iterations with {step}"
                 )
             if debug_options.plot_gp:
                 if S_debug is None:
-                    S_debug = init_S_debug(search_interval, np)
-                    f_debug = np.array([fg(x_old + s * d)[0] for s in S_debug])
+                    S_debug, f_debug = init_debug(search_interval, fg, np)
                 print_debug_info(
                     GP_posterior,
                     S_debug,
@@ -349,7 +351,7 @@ def gp_line_search(
                     (f_known + normalization_offset) * normalization_scale,
                     acquisitionFunction,
                 )
-            return f, g, x, step, fun_eval, True
+            return step, True
 
         if len(step_known) > max_sample_count:
             if debug_options.report_termination_reason:
@@ -366,7 +368,7 @@ def gp_line_search(
         # Normalize condition values to have consistent scale of std-deviation (sqrt of variance, thus scale has large effect)
         normalization_offset, normalization_scale = normalization_parameters(f_known)
         f_known_normalized = (f_known + normalization_offset) * normalization_scale
-        step_g_known_normalized = step_g_known * normalization_scale
+        step_g_known_normalized = g_known * normalization_scale
 
         # The prior mean of the Gaussian Process
         prior_mean = ZeroMean()
@@ -436,8 +438,7 @@ def gp_line_search(
             print(f"Maximized acquisition function at {step}")
         if debug_options.plot_gp and k >= debug_options.plot_threshold:
             if S_debug is None:
-                S_debug = init_S_debug(search_interval, np)
-                f_debug = np.array([fg(x_old + s * d)[0] for s in S_debug])
+                S_debug, f_debug = init_debug(search_interval, fg, np)
             print_debug_info(
                 GP_posterior,
                 S_debug,
@@ -451,8 +452,7 @@ def gp_line_search(
 
     if debug_options.plot_gp and len(step_known) > 1:
         if S_debug is None:
-            S_debug = init_S_debug(search_interval, np)
-            f_debug = np.array([fg(x_old + s * d)[0] for s in S_debug])
+            S_debug, f_debug = init_debug(search_interval, fg, np)
         print_debug_info(
             GP_posterior,
             S_debug,
@@ -462,18 +462,7 @@ def gp_line_search(
             acquisitionFunction,
         )
 
-    return return_best_step(
-        x_old,
-        f_old,
-        g_old,
-        d,
-        step_known,
-        f_known,
-        g_known,
-        fun_eval,
-        np,
-        debug_options,
-    )
+    return return_best_step(step_known, f_known, np)
 
 
 def line_search(
@@ -514,12 +503,8 @@ def line_search(
     np = value_or_value(np, numpy)
     debug_options = value_or_func(debug_options, LineSearchDebugOptions)
 
-    # For computation of directional derivatives we need the unit vector of the direction. Since step is scaled by d, we add the size back in though.
-    # d_norm = d / np.linalg.norm(d)
-    d_norm = d
-
     # Test to ensure that d is a descent direction
-    if dg := np.dot(g_old, d) >= 0:
+    if dg := d.T @ g_old >= 0:
         assert (
             False
         ), f"Descent direction should be descent direction. Directional gradient was {dg} in direction {d}"
@@ -527,48 +512,53 @@ def line_search(
     step_min = 0.0
     step_max = min(float(step_max), 1.0)  # Start initially with at most 1.0
 
-    total_fun_eval = 0
-
     step = None
 
     k = 0
 
-    data_points = [DataPoint(0.0, x_old, f_old, g_old, np.dot(g_old, d_norm))]
+    line_search_function = LineSearchFunctionWrapper(fg, x_old, f_old, g_old, d)
 
     while True:
-        f, g, x, step, fun_eval, wolfe_met = gp_line_search(
-            x_old,
-            d,
-            d_norm,
-            fg,
+        step, wolfe_met = gp_line_search(
+            line_search_function.phi,
             (step_min, step_max),
-            f_old,
-            g_old,
-            data_points,
+            line_search_function.known_steps(),
+            line_search_function.strong_wolfe_condition_met,
             np,
             debug_options,
             max_sample_count,
         )
 
-        total_fun_eval += fun_eval
+        if debug_options.report_return_value:
+            print(f"returned step={step} with f={line_search_function.fg(step)[0]}")
 
         if wolfe_met:
             if debug_options.report_wolfe_termination:
                 print(f"Wolfe after {k} iterations")
-            return f, g, x, step, total_fun_eval
+            data_point = line_search_function.data_point(step)
+            return (
+                data_point.f,
+                data_point.g,
+                data_point.x,
+                step,
+                line_search_function.fun_eval,
+            )
 
         # Stop if any of the termination conditions are met
         if k > max_iter:
             if debug_options.report_wolfe_termination:
                 print("Terminated line search due to exceeded iteration count")
-            best_data_point = find_best_data_point(data_points, np)
+            best_data_point = line_search_function.find_best_data_point()
             return (
                 best_data_point.f,
                 best_data_point.g,
                 best_data_point.x,
                 best_data_point.step,
-                total_fun_eval,
+                line_search_function.fun_eval,
             )
+
+        if step == 0.0 or (line_search_function.data_point(step).x == x_old).all():
+            step = None
 
         if step is not None and step == step_max:
             # Double the search are, since the Bayesian optimization expects the optimum to be past step_max
@@ -581,9 +571,11 @@ def line_search(
                 )
         else:  # None or step < step_max which is a better point that does not satisfy the strong wolfe condition
             # Reduce the search area, since gp_line search could not find step on current search area (too big, thus large instability or thorough search)
-            # TODO: Reduce area to be around best value found yet maybe
             data_points_in_interval = [
-                d for d in data_points if step_min <= d.step and d.step <= step_max
+                d
+                for d in line_search_function.__data_points
+                if step_min <= d.step
+                and d.step <= step_max  # TODO: Don't access private member
             ]
             data_points_in_interval.sort(key=lambda d: d.step)
             step_max = min(
