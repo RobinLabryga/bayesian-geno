@@ -196,7 +196,7 @@ class LineSearchFunctionWrapper:
         data_point = self.__data_points[step]
         return data_point.f, data_point.g
 
-    def phi(self, step:float)-> tuple[float, float]:
+    def phi(self, step: float) -> tuple[float, float]:
         """
         Args:
             step (float): The step
@@ -207,7 +207,7 @@ class LineSearchFunctionWrapper:
         f, g = self.fg(step)
         return f, self.d.T @ g
 
-    def psi(self, step:float)->tuple[float, float]:
+    def psi(self, step: float) -> tuple[float, float]:
         """
         Args:
             step (float): The step
@@ -517,6 +517,30 @@ def gp_line_search(
 
     return return_best_step(step_known, f_known, np)
 
+def find_interval_with_wolfe(line_search_function, step_l, step_u, debug_options):
+    """Moves interval to ensure point that satisfies strong Wolfe condition is inside"""
+    while True:
+        psi_f_l, psi_g_l = line_search_function.psi(step_l)
+        psi_f_u, psi_g_u = line_search_function.psi(step_u)
+
+        # TODO: Consider if a check for phi_g_u >= makes sense
+        if psi_f_u < psi_f_l and psi_g_u < 0:
+            step_l, step_u = step_u, 2 * step_u
+            if debug_options.report_area_reduction:
+                print(f"Moved interval to ({step_l}, {step_u})")
+        else:
+            return step_l, step_u
+        
+def get_next_interval(line_search_function:LineSearchFunctionWrapper, step_l, step_u, step_t):
+    psi_f, psi_g = line_search_function.psi(step_t)
+    if psi_f > line_search_function.psi(step_l)[0]:
+        return step_l, step_t
+    else:
+        # TODO: Make sure g is not 0.0
+        if psi_g * (step_l-step_t) > 0:
+            return step_t, step_u
+        else:
+            return step_t, step_l
 
 def line_search(
     x_old,
@@ -562,37 +586,23 @@ def line_search(
             False
         ), f"Descent direction should be descent direction. Directional gradient was {dg} in direction {d}"
 
-    step_min = 0.0
-    step_max = min(float(step_max), 1.0)  # Start initially with at most 1.0
-
     line_search_function = LineSearchFunctionWrapper(fg, x_old, f_old, g_old, d, np=np)
 
-    # Move interval to ensure point that satisfies strong Wolfe condition is inside
-    while True:
-        psi_f_l, psi_g_l = line_search_function.psi(step_min)
-        psi_f_u, psi_g_u = line_search_function.psi(step_max)
-
-        # TODO: Consider if a check for phi_g_u >= makes sense
-        if psi_f_u < psi_f_l and psi_g_u < 0:
-            step_min, step_max = step_max, 2 * step_max
-            if debug_options.report_area_reduction:
-                print(f"Moved interval to ({step_min}, {step_max})")
-        else:
-            break
+    step_l, step_u = find_interval_with_wolfe(line_search_function, 0.0, 1.0, debug_options)
 
     k = 0
     step = None
 
     step_l, step_u = (
-        (step_min, step_max)
-        if line_search_function.fg(step_min)[0] <= line_search_function.fg(step_max)[0]
-        else (step_max, step_min)
+        (step_l, step_u)
+        if line_search_function.fg(step_l)[0] <= line_search_function.fg(step_u)[0]
+        else (step_u, step_l)
     )
 
     while True:
         step, wolfe_met = gp_line_search(
-            line_search_function.phi,
-            (step_min, step_max),
+            line_search_function.psi,
+            (min(step_l, step_u), max(step_l, step_u)),
             line_search_function.known_steps(),
             line_search_function.strong_wolfe_condition_met,
             np,
@@ -628,39 +638,27 @@ def line_search(
                 line_search_function.fun_eval,
             )
 
-        if step == 0.0 or (line_search_function.data_point(step).x == x_old).all():
-            step = None
+        if step == max(step_l, step_u):
+            print(
+                "Bayesian optimization expects minimum to right of interval"
+            )  # TODO: Test this
 
-        if step is not None and step == step_max:
-            # Double the search are, since the Bayesian optimization expects the optimum to be past step_max
-            step_min = step_max
-            step_max *= 2.0
+        x = line_search_function.data_point(step).x
 
-            if debug_options.report_area_reduction:
-                print(
-                    f"Minimum seems to be past step_max. Restarting with search_interval={(step_min, step_max)}"
-                )
-        else:  # None or step < step_max which is a better point that does not satisfy the strong wolfe condition
-            # Reduce the search area, since gp_line search could not find step on current search area (too big, thus large instability or thorough search)
-            data_points_in_interval = [
-                d
-                for d in line_search_function.__data_points
-                if step_min <= d.step
-                and d.step <= step_max  # TODO: Don't access private member
-            ]
-            data_points_in_interval.sort(key=lambda d: d.step)
-            step_max = min(
-                (
-                    data_points_in_interval[4].step
-                    if len(data_points_in_interval) > 4
-                    else step_max
-                ),
-                (step_min + step_max) * 0.5,
+        # Check if x is identical to one of the bounds despite different step values
+        if step != step_l and (x == line_search_function.data_point(step_l).x).all():
+            step = step_l
+        elif step != step_u and (x == line_search_function.data_point(step_u).x).all():
+            step = step_u
+
+        if step in (step_l, step_u):
+            step = (step_l + step_u) / 2.0 # Don't use bisection, use existing samples
+
+        step_l, step_u = get_next_interval(line_search_function, step_l, step_u, step)
+
+        if debug_options.report_area_reduction:
+            print(
+                f"Could not find step. Restarting with search_interval={(step_l, step_u)}"
             )
-
-            if debug_options.report_area_reduction:
-                print(
-                    f"Could not find step. Restarting with search_interval={(step_min, step_max)}"
-                )
 
         k += 1
