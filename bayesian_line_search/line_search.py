@@ -518,6 +518,19 @@ def line_search(
 
     line_search_function = LineSearchFunctionWrapper(fg, x_old, f_old, g_old, d)
 
+    # Move interval to ensure point that satisfies strong Wolfe condition is inside
+    while True:
+        psi_f_l, psi_g_l = line_search_function.psi(step_min)
+        psi_f_u, psi_g_u = line_search_function.psi(step_max)
+
+        # TODO: Consider if a check for phi_g_u >= makes sense
+        if psi_f_u < psi_f_l and psi_g_u < 0:
+            step_min, step_max = step_max, 2 * step_max
+            if debug_options.report_area_reduction:
+                print(f"Moved interval to ({step_min}, {step_max})")
+        else:
+            break
+
     while True:
         step, wolfe_met = gp_line_search(
             line_search_function.phi,
