@@ -124,8 +124,28 @@ class DataPoint:
 
 class LineSearchFunctionWrapper:
     def __init__(
-        self, fg, x0, f0, g0, d, np=None, wolfe_c1=1.0e-4, wolfe_c2=0.9
+        self,
+        fg,
+        x0: numpy.ndarray,
+        f0: float,
+        g0: numpy.ndarray,
+        d: numpy.ndarray,
+        np: types.ModuleType = None,
+        wolfe_c1: float = 1.0e-4,
+        wolfe_c2: float = 0.9,
     ) -> None:
+        """A class wrapping function access for line search
+
+        Args:
+            fg (_type_): The objective function
+            x0 (numpy.ndarray): The search start point
+            f0 (float): The function value at x0
+            g0 (numpy.ndarray): The gradient at x0
+            d (numpy.ndarray): The search direction
+            np (types.ModuleType, optional): The numpy module to use. numpy on None Defaults to None.
+            wolfe_c1 (float, optional): The parameter for the sufficient decrease condition. Defaults to 1.0e-4.
+            wolfe_c2 (float, optional): The parameter for the curvature condition. Defaults to 0.9.
+        """
         self.np = value_or_value(np, numpy)
         self.__fg = fg
         self.x0 = x0
@@ -137,14 +157,36 @@ class LineSearchFunctionWrapper:
         self.__data_points = {0.0: DataPoint(0.0, x0, f0, g0)}
         self.fun_eval = 0
 
-    def data_point(self, step):
+    def data_point(self, step: float) -> DataPoint:
+        """
+        Args:
+            step (float): The step
+
+        Returns:
+            DataPoint: The data point at step
+        """
         assert step in self.__data_points
         return self.__data_points[step]
 
-    def x(self, step):
+    def x(self, step: float) -> numpy.ndarray:
+        """x0 + step * d
+
+        Args:
+            step (float): The step
+
+        Returns:
+            numpy.ndarray: The x value at step
+        """
         return self.x0 + step * self.d
 
-    def fg(self, step):
+    def fg(self, step: float) -> tuple[float, numpy.ndarray]:
+        """
+        Args:
+            step (float): The step
+
+        Returns:
+            tuple[float, numpy.ndarray]: function value and gradient at step
+        """
         if step not in self.__data_points:
             # TODO: Check if x already exists to avoid duplicate evaluation for case where step too small to change x numerically
             x = self.x(step)
@@ -154,11 +196,25 @@ class LineSearchFunctionWrapper:
         data_point = self.__data_points[step]
         return data_point.f, data_point.g
 
-    def phi(self, step):
+    def phi(self, step:float)-> tuple[float, float]:
+        """
+        Args:
+            step (float): The step
+
+        Returns:
+            tuple[float, float]: The function value and direction gradient at step
+        """
         f, g = self.fg(step)
         return f, self.d.T @ g
 
-    def psi(self, step):
+    def psi(self, step:float)->tuple[float, float]:
+        """
+        Args:
+            step (float): The step
+
+        Returns:
+            tuple[float, float]: The difference between the sufficient decrease condition ray and the function value and the gradient of the difference at step
+        """
         phi_0_f, phi_0_g = self.f0, self.dg0
         phi_f, phi_g = self.phi(step)
         return (
@@ -180,7 +236,7 @@ class LineSearchFunctionWrapper:
             ):
                 best = data_point
 
-        data_point_old = self.__data_points[0]
+        data_point_old = self.__data_points[0.0]
 
         if (data_point_old.x == best.x).all():  # step too small to change x
             return data_point_old
@@ -232,19 +288,16 @@ def gp_line_search(
     """_summary_
 
     Args:
-        x_old (_type_): _description_
-        d (_type_): _description_
         fg (_type_): _description_
         search_interval (tuple[float, float]): _description_
-        f_old (_type_): _description_
-        g_old (_type_): _description_
-        data_points (list[DataPoint]): _description_
+        step_known (_type_): _description_
+        wolfe_condition_met (_type_): _description_
         np (types.ModuleType): _description_
         debug_options (LineSearchDebugOptions): _description_
         max_sample_count (int): _description_
 
     Returns:
-        tuple[float, int, bool]: step, wolfe_met
+        tuple[float, bool]: step, wolfe_met
     """
 
     # TODO: Require step and step max present and finite
@@ -512,11 +565,7 @@ def line_search(
     step_min = 0.0
     step_max = min(float(step_max), 1.0)  # Start initially with at most 1.0
 
-    step = None
-
-    k = 0
-
-    line_search_function = LineSearchFunctionWrapper(fg, x_old, f_old, g_old, d)
+    line_search_function = LineSearchFunctionWrapper(fg, x_old, f_old, g_old, d, np=np)
 
     # Move interval to ensure point that satisfies strong Wolfe condition is inside
     while True:
@@ -530,6 +579,15 @@ def line_search(
                 print(f"Moved interval to ({step_min}, {step_max})")
         else:
             break
+
+    k = 0
+    step = None
+
+    step_l, step_u = (
+        (step_min, step_max)
+        if line_search_function.fg(step_min)[0] <= line_search_function.fg(step_max)[0]
+        else (step_max, step_min)
+    )
 
     while True:
         step, wolfe_met = gp_line_search(
@@ -566,7 +624,7 @@ def line_search(
                 best_data_point.f,
                 best_data_point.g,
                 best_data_point.x,
-                best_data_point.step,
+                best_data_point.step if best_data_point.step != 0.0 else None,
                 line_search_function.fun_eval,
             )
 
