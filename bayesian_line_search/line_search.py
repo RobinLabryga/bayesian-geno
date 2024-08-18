@@ -545,6 +545,19 @@ def get_next_interval(objective, step_l, step_u, step_t):
             return step_t, step_l
 
 
+def update_line_search_objective(
+    line_search_function: LineSearchFunctionWrapper, step, current_line_search_objective
+):
+    """Change objective to phi if conditions are met"""
+    return (
+        line_search_function.phi
+        if current_line_search_objective is line_search_function.psi
+        and line_search_function.psi(step)[0] <= 0.0
+        and line_search_function.phi(step)[1] > 0
+        else current_line_search_objective
+    )
+
+
 def line_search(
     x_old,
     d,
@@ -598,11 +611,8 @@ def line_search(
         line_search_function, 0.0, 1.0, debug_options
     )
 
-    line_search_objective = (
-        line_search_function.phi
-        if line_search_function.psi(step_u)[0] <= 0.0
-        and line_search_function.phi(step_u)[1] > 0
-        else line_search_function.psi
+    line_search_objective = update_line_search_objective(
+        line_search_function, step_u, line_search_function.psi
     )
 
     step_l, step_u = (
@@ -611,7 +621,29 @@ def line_search(
         else (step_u, step_l)
     )
 
+    interval_size_decrease_factor = 2.0 / 3.0
+    interval_size_prev_prev = np.inf
+    interval_size_prev = np.inf
+
     while True:
+
+        # Make sure interval size has decreased sufficiently in the previous iterations
+        interval_size = abs(step_l - step_u)
+        if interval_size >= interval_size_decrease_factor * interval_size_prev_prev:
+            print(
+                f"Forced interval bisection on ({min(step_l, step_u)} ,{max(step_l, step_u)})"
+            )  # TODO: Add debug check
+            step = (step_l + step_u) / 2.0
+            line_search_objective = update_line_search_objective(
+                line_search_function, step, line_search_objective
+            )
+            step_l, step_u = get_next_interval(
+                line_search_objective, step_l, step_u, step
+            )
+            interval_size = abs(step_l - step_u)
+            k += 1
+        interval_size_prev_prev, interval_size_prev = interval_size_prev, interval_size
+
         step, wolfe_met = gp_line_search(
             line_search_objective,
             (min(step_l, step_u), max(step_l, step_u)),
@@ -665,34 +697,34 @@ def line_search(
 
         # Ensure trial step differs from step_l and step_u
         if step in (step_l, step_u):
-            steps_in_interval = sorted([
-                s
-                for s in line_search_function.known_steps()
-                if min(step_l, step_u) < s
-                and s < max(step_l, step_u)
-                and (x != line_search_function.data_point(step_l).x).all()
-                and (x != line_search_function.data_point(step_u).x).all()
-            ])
+            steps_in_interval = sorted(
+                [
+                    s
+                    for s in line_search_function.known_steps()
+                    if min(step_l, step_u) < s
+                    and s < max(step_l, step_u)
+                    and (x != line_search_function.data_point(step_l).x).all()
+                    and (x != line_search_function.data_point(step_u).x).all()
+                ]
+            )
 
             if len(steps_in_interval) == 0:
-                step = (
-                    step_l + step_u
-                ) / 2.0
+                step = (step_l + step_u) / 2.0
             else:
-                possible_steps = [steps_in_interval[0],statistics.median_low(steps_in_interval), steps_in_interval[-1]]
-                resulting_intervals = [get_next_interval(line_search_objective, step_l, step_u, s) for s in possible_steps]
-                resulting_interval_lengths = [abs(l,u) for l,u in resulting_intervals]
+                possible_steps = [
+                    steps_in_interval[0],
+                    statistics.median_low(steps_in_interval),
+                    steps_in_interval[-1],
+                ]
+                resulting_intervals = [
+                    get_next_interval(line_search_objective, step_l, step_u, s)
+                    for s in possible_steps
+                ]
+                resulting_interval_lengths = [abs(l, u) for l, u in resulting_intervals]
                 step = possible_steps[np.argmin(resulting_interval_lengths)]
 
-        # TODO: Make sure interval decreases sufficiently
-
-        # Change objective to phi if conditions are met
-        line_search_objective = (
-            line_search_function.phi
-            if line_search_objective is line_search_function.psi
-            and line_search_function.psi(step_u)[0] <= 0.0
-            and line_search_function.phi(step_u)[1] > 0
-            else line_search_objective
+        line_search_objective = update_line_search_objective(
+            line_search_function, step, line_search_objective
         )
 
         step_l, step_u = get_next_interval(line_search_objective, step_l, step_u, step)
