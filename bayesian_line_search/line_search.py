@@ -3,6 +3,7 @@ from gaussian_process.kernels import Matern2_5Kernel
 import gaussian_process.GPfunctions as gp
 import numpy
 import types
+import statistics
 from acquisition import AcquisitionFunction, LowerConfidenceBound
 from acquisition.optimization import DIRECT_LBFGSB_AcquisitionOptimizer
 from gaussian_process.prior_mean import ZeroMean
@@ -662,11 +663,30 @@ def line_search(
         elif step != step_u and (x == line_search_function.data_point(step_u).x).all():
             step = step_u
 
+        # Ensure trial step differs from step_l and step_u
         if step in (step_l, step_u):
-            step = (
-                step_l + step_u
-            ) / 2.0  # TODO: Don't use bisection, use existing samples
+            steps_in_interval = sorted([
+                s
+                for s in line_search_function.known_steps()
+                if min(step_l, step_u) < s
+                and s < max(step_l, step_u)
+                and (x != line_search_function.data_point(step_l).x).all()
+                and (x != line_search_function.data_point(step_u).x).all()
+            ])
 
+            if len(steps_in_interval) == 0:
+                step = (
+                    step_l + step_u
+                ) / 2.0
+            else:
+                possible_steps = [steps_in_interval[0],statistics.median_low(steps_in_interval), steps_in_interval[-1]]
+                resulting_intervals = [get_next_interval(line_search_objective, step_l, step_u, s) for s in possible_steps]
+                resulting_interval_lengths = [abs(l,u) for l,u in resulting_intervals]
+                step = possible_steps[np.argmin(resulting_interval_lengths)]
+
+        # TODO: Make sure interval decreases sufficiently
+
+        # Change objective to phi if conditions are met
         line_search_objective = (
             line_search_function.phi
             if line_search_objective is line_search_function.psi
