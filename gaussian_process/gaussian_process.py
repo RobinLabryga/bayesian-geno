@@ -6,6 +6,7 @@ from gaussian_process.kernels import Kernel
 from gaussian_process.prior_mean import PriorMean, ZeroMean
 import scipy.linalg
 import numpy
+import numbers
 from util import value_or_func, value_or_value
 
 
@@ -282,10 +283,14 @@ class GaussianProcess:
         assert kernel is not None
 
         assert (
-            f_noise is None or type(f_noise) is float or len(f_noise) == len(f_known)
+            f_noise is None
+            or isinstance(f_noise, numbers.Number)
+            or len(f_noise) == len(f_known)
         ), "noise must be a factor or the same length as the corresponding values"
         assert (
-            g_noise is None or type(g_noise) is float or len(g_noise) == len(g_known)
+            g_noise is None
+            or isinstance(f_noise, numbers.Number)
+            or len(g_noise) == len(g_known)
         ), "noise must be a factor or the same length as the corresponding values"
 
         self.verbose = verbose
@@ -313,13 +318,13 @@ class GaussianProcess:
 
         self.f_noise = (
             self.np.full(len(x_known), f_noise)
-            if type(f_noise) is float
+            if isinstance(f_noise, numbers.Number)
             else f_noise  # ndarray or None
         )
         """The noise of the known function values"""
         self.g_noise = (
             self.np.full(len(x_known), g_noise)
-            if type(g_noise) is float
+            if isinstance(g_noise, numbers.Number)
             else g_noise  # ndarray or None
         )
         """The noise of the known gradients"""

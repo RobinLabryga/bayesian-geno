@@ -227,12 +227,11 @@ class LineSearchFunctionWrapper:
 
     def find_best_data_point(self):
         best = None
-        for data_point in self.__data_points:
+        for step, data_point in self.__data_points.items():
             if (
                 best is None
                 or data_point.f < best.f
-                or data_point.f <= best.f
-                and data_point.step > best.step
+                or (data_point.f <= best.f and data_point.step > best.step)
             ):
                 best = data_point
 
@@ -517,6 +516,7 @@ def gp_line_search(
 
     return return_best_step(step_known, f_known, np)
 
+
 def find_interval_with_wolfe(line_search_function, step_l, step_u, debug_options):
     """Moves interval to ensure point that satisfies strong Wolfe condition is inside"""
     while True:
@@ -530,17 +530,19 @@ def find_interval_with_wolfe(line_search_function, step_l, step_u, debug_options
                 print(f"Moved interval to ({step_l}, {step_u})")
         else:
             return step_l, step_u
-        
-def get_next_interval(line_search_function:LineSearchFunctionWrapper, step_l, step_u, step_t):
-    psi_f, psi_g = line_search_function.psi(step_t)
-    if psi_f > line_search_function.psi(step_l)[0]:
+
+
+def get_next_interval(objective, step_l, step_u, step_t):
+    f, g = objective(step_t)
+    if f > objective(step_l)[0]:
         return step_l, step_t
     else:
         # TODO: Make sure g is not 0.0
-        if psi_g * (step_l-step_t) > 0:
+        if g * (step_l - step_t) > 0:
             return step_t, step_u
         else:
             return step_t, step_l
+
 
 def line_search(
     x_old,
@@ -588,10 +590,19 @@ def line_search(
 
     line_search_function = LineSearchFunctionWrapper(fg, x_old, f_old, g_old, d, np=np)
 
-    step_l, step_u = find_interval_with_wolfe(line_search_function, 0.0, 1.0, debug_options)
-
     k = 0
     step = None
+
+    step_l, step_u = find_interval_with_wolfe(
+        line_search_function, 0.0, 1.0, debug_options
+    )
+
+    line_search_objective = (
+        line_search_function.phi
+        if line_search_function.psi(step_u)[0] <= 0.0
+        and line_search_function.phi(step_u)[1] > 0
+        else line_search_function.psi
+    )
 
     step_l, step_u = (
         (step_l, step_u)
@@ -601,7 +612,7 @@ def line_search(
 
     while True:
         step, wolfe_met = gp_line_search(
-            line_search_function.psi,
+            line_search_objective,
             (min(step_l, step_u), max(step_l, step_u)),
             line_search_function.known_steps(),
             line_search_function.strong_wolfe_condition_met,
@@ -652,9 +663,19 @@ def line_search(
             step = step_u
 
         if step in (step_l, step_u):
-            step = (step_l + step_u) / 2.0 # Don't use bisection, use existing samples
+            step = (
+                step_l + step_u
+            ) / 2.0  # TODO: Don't use bisection, use existing samples
 
-        step_l, step_u = get_next_interval(line_search_function, step_l, step_u, step)
+        line_search_objective = (
+            line_search_function.phi
+            if line_search_objective is line_search_function.psi
+            and line_search_function.psi(step_u)[0] <= 0.0
+            and line_search_function.phi(step_u)[1] > 0
+            else line_search_objective
+        )
+
+        step_l, step_u = get_next_interval(line_search_objective, step_l, step_u, step)
 
         if debug_options.report_area_reduction:
             print(
