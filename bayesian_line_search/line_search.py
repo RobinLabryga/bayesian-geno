@@ -593,6 +593,9 @@ def line_search(
         step (_type_): The step length of the line search
         fun_eval (_type_): The number of function evaluations done during the line search
     """
+
+    # TODO: Make sure we only ever return a point that is actually the smallest we have seen, even if another one satisfies the strong Wolfe conditions.
+
     np = value_or_value(np, numpy)
     debug_options = value_or_func(debug_options, LineSearchDebugOptions)
 
@@ -630,9 +633,10 @@ def line_search(
         # Make sure interval size has decreased sufficiently in the previous iterations
         interval_size = abs(step_l - step_u)
         if interval_size >= interval_size_decrease_factor * interval_size_prev_prev:
-            print(
-                f"Forced interval bisection on ({min(step_l, step_u)} ,{max(step_l, step_u)})"
-            )  # TODO: Add debug check
+            if debug_options.report_area_reduction:
+                print(
+                    f"Forced interval bisection on ({min(step_l, step_u)} ,{max(step_l, step_u)})"
+                )
             step = (step_l + step_u) / 2.0
             line_search_objective = update_line_search_objective(
                 line_search_function, step, line_search_objective
@@ -682,11 +686,6 @@ def line_search(
                 line_search_function.fun_eval,
             )
 
-        if step == max(step_l, step_u):
-            print(
-                "Bayesian optimization expects minimum to right of interval"
-            )  # TODO: Test this
-
         x = line_search_function.data_point(step).x
 
         # Check if x is identical to one of the bounds despite different step values
@@ -716,6 +715,7 @@ def line_search(
                     statistics.median_low(steps_in_interval),
                     steps_in_interval[-1],
                 ]
+                # TODO: Use update_line_search_objective
                 resulting_intervals = [
                     get_next_interval(line_search_objective, step_l, step_u, s)
                     for s in possible_steps
