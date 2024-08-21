@@ -333,6 +333,17 @@ def gp_line_search(
 
         # Let caller decide how to change search area
         return return_best_step(step_known, f_known, np)
+    
+    if not np.isfinite(g_known).all():
+        if debug_options.report_invalid_f:
+            print(
+                f"Known gs in search interval contained invalid value g_known={g_known}"
+            )
+        if debug_options.report_termination_reason:
+            print(f"Line search terminated due to condition value not finite")
+
+        # Let caller decide how to change search area
+        return return_best_step(step_known, f_known, np)
 
     step = step_max  # We start at the max step size
 
