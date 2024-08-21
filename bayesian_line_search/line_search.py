@@ -265,7 +265,7 @@ class LineSearchFunctionWrapper:
 def find_best_step(step_known, f_known, np):
     # TODO: Maybe return best of posterior mean instead (literature has some info)
 
-    smallest_value_indices = np.nonzero(f_known == np.min(f_known))[0]
+    smallest_value_indices = np.nonzero(f_known == np.nanmin(f_known))[0]
     largest_step_with_smallest_value_index = smallest_value_indices[
         np.argmax(step_known[smallest_value_indices])
     ]
