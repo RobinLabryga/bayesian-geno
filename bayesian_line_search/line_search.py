@@ -734,11 +734,24 @@ def line_search(
                 resulting_interval_lengths = [abs(l, u) for l, u in resulting_intervals]
                 step = possible_steps[np.argmin(resulting_interval_lengths)]
 
+
         line_search_objective = update_line_search_objective(
             line_search_function, step, line_search_objective
         )
 
         step_l, step_u = get_next_interval(line_search_objective, step_l, step_u, step)
+        
+        if step_l == step_u:
+            if debug_options.report_wolfe_termination:
+                print("Terminated line search due to smallest interval reached")
+            data_point = line_search_function.data_point(step)
+            return (
+                data_point.f,
+                data_point.g,
+                data_point.x,
+                step,
+                line_search_function.fun_eval,
+            )
 
         if debug_options.report_area_reduction:
             print(
