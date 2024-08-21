@@ -64,7 +64,7 @@ def normalization_parameters(f_known):
 
 def init_debug(search_interval, fg, np):
     S_debug = np.linspace(start=search_interval[0], stop=search_interval[1], num=100)
-    f_debug = np.array([fg(s)[0] for s in S_debug])
+    f_debug = np.array([fg(s, debug=True)[0] for s in S_debug])
     return S_debug, f_debug
 
 
@@ -180,7 +180,7 @@ class LineSearchFunctionWrapper:
         """
         return self.x0 + step * self.d
 
-    def fg(self, step: float) -> tuple[float, numpy.ndarray]:
+    def fg(self, step: float, debug: bool = False) -> tuple[float, numpy.ndarray]:
         """
         Args:
             step (float): The step
@@ -188,6 +188,9 @@ class LineSearchFunctionWrapper:
         Returns:
             tuple[float, numpy.ndarray]: function value and gradient at step
         """
+        if debug:
+            return self.__fg(self.x(step))
+
         if step not in self.__data_points:
             # TODO: Check if x already exists to avoid duplicate evaluation for case where step too small to change x numerically
             x = self.x(step)
@@ -197,7 +200,7 @@ class LineSearchFunctionWrapper:
         data_point = self.__data_points[step]
         return data_point.f, data_point.g
 
-    def phi(self, step: float) -> tuple[float, float]:
+    def phi(self, step: float, debug: bool = False) -> tuple[float, float]:
         """
         Args:
             step (float): The step
@@ -205,10 +208,10 @@ class LineSearchFunctionWrapper:
         Returns:
             tuple[float, float]: The function value and direction gradient at step
         """
-        f, g = self.fg(step)
+        f, g = self.fg(step, debug)
         return f, self.d.T @ g
 
-    def psi(self, step: float) -> tuple[float, float]:
+    def psi(self, step: float, debug: bool = False) -> tuple[float, float]:
         """
         Args:
             step (float): The step
@@ -217,7 +220,7 @@ class LineSearchFunctionWrapper:
             tuple[float, float]: The difference between the sufficient decrease condition ray and the function value and the gradient of the difference at step
         """
         phi_0_f, phi_0_g = self.f0, self.dg0
-        phi_f, phi_g = self.phi(step)
+        phi_f, phi_g = self.phi(step, debug)
         return (
             phi_f - (phi_0_f + self.__wolfe_c1 * self.dg0 * step),
             phi_g - self.__wolfe_c1 * phi_0_g,
@@ -540,7 +543,7 @@ def find_interval_with_wolfe(line_search_function, step_l, step_u, debug_options
                     None,
                     *init_debug(
                         (step_l, step_u),
-                        line_search_function.fg,
+                        line_search_function.psi,
                         np,
                     ),
                     [step_l, step_u],
