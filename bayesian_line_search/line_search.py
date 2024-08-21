@@ -332,7 +332,7 @@ def gp_line_search(
 
         # Let caller decide how to change search area
         return return_best_step(step_known, f_known, np)
-    
+
     if not np.isfinite(g_known).all():
         if debug_options.report_invalid_f:
             print(
@@ -527,7 +527,7 @@ def gp_line_search(
     return return_best_step(step_known, f_known, np)
 
 
-def find_interval_with_wolfe(line_search_function, step_l, step_u, debug_options):
+def find_interval_with_wolfe(line_search_function, step_l, step_u, debug_options, np):
     """Moves interval to ensure point that satisfies strong Wolfe condition is inside"""
     while True:
         psi_f_l, psi_g_l = line_search_function.psi(step_l)
@@ -535,6 +535,21 @@ def find_interval_with_wolfe(line_search_function, step_l, step_u, debug_options
 
         # TODO: Consider if a check for phi_g_u >= makes sense
         if psi_f_u < psi_f_l and psi_g_u < 0:
+            if debug_options.plot_gp:
+                print_debug_info(
+                    None,
+                    *init_debug(
+                        (step_l, step_u),
+                        line_search_function.fg,
+                        np,
+                    ),
+                    [step_l, step_u],
+                    [
+                        line_search_function.psi(step_l)[0],
+                        line_search_function.psi(step_u)[0],
+                    ],
+                    None,
+                )
             step_l, step_u = step_u, 2 * step_u
             if debug_options.report_area_reduction:
                 print(f"Moved interval to ({step_l}, {step_u})")
@@ -620,7 +635,7 @@ def line_search(
     step = None
 
     step_l, step_u = find_interval_with_wolfe(
-        line_search_function, 0.0, 1.0, debug_options
+        line_search_function, 0.0, 1.0, debug_options, np
     )
 
     line_search_objective = update_line_search_objective(
@@ -650,6 +665,22 @@ def line_search(
             line_search_objective = update_line_search_objective(
                 line_search_function, step, line_search_objective
             )
+            if debug_options.plot_gp:
+                print_debug_info(
+                    None,
+                    *init_debug(
+                        (min(step_l, step_u), max(step_l, step_u)),
+                        line_search_objective,
+                        np,
+                    ),
+                    [min(step_l, step_u), step, max(step_l, step_u)],
+                    [
+                        line_search_objective(min(step_l, step_u))[0],
+                        line_search_objective(step)[0],
+                        line_search_objective(max(step_l, step_u))[0],
+                    ],
+                    None,
+                )
             step_l, step_u = get_next_interval(
                 line_search_objective, step_l, step_u, step
             )
@@ -681,7 +712,7 @@ def line_search(
                 step,
                 line_search_function.fun_eval,
             )
-        
+
         # Stop if any of the termination conditions are met
         if k > max_iter:
             if debug_options.report_wolfe_termination:
@@ -694,7 +725,7 @@ def line_search(
                 best_data_point.step if best_data_point.step != 0.0 else None,
                 line_search_function.fun_eval,
             )
-        
+
         step_data_point = line_search_function.data_point(step)
 
         if step_data_point.f == -np.inf:
@@ -744,7 +775,6 @@ def line_search(
                 ]
                 resulting_interval_lengths = [abs(l, u) for l, u in resulting_intervals]
                 step = possible_steps[np.argmin(resulting_interval_lengths)]
-
 
         line_search_objective = update_line_search_objective(
             line_search_function, step, line_search_objective
