@@ -300,7 +300,7 @@ def gp_line_search(
         tuple[float, bool]: step, wolfe_met
     """
 
-    # TODO: Require step and step max present and finite
+    # TODO: Maybe require step and step max present and finite
 
     # Containers used for debug. Initialized just in time.
     S_debug = None
@@ -323,7 +323,6 @@ def gp_line_search(
     g_known = np.array(g_known)
 
     if not np.isfinite(f_known).all():
-        # TODO: On -inf return
         if debug_options.report_invalid_f:
             print(
                 f"Known fs in search interval contained invalid value f_known={f_known}"
@@ -376,7 +375,6 @@ def gp_line_search(
             f, step_g = fg(step)
 
             if not np.isfinite(f):
-                # TODO: On -inf return
                 if debug_options.report_invalid_f:
                     print(
                         f"Encountered f={f} at step={step}, which can not be used for Gaussian Process"
@@ -683,7 +681,7 @@ def line_search(
                 step,
                 line_search_function.fun_eval,
             )
-
+        
         # Stop if any of the termination conditions are met
         if k > max_iter:
             if debug_options.report_wolfe_termination:
@@ -696,8 +694,21 @@ def line_search(
                 best_data_point.step if best_data_point.step != 0.0 else None,
                 line_search_function.fun_eval,
             )
+        
+        step_data_point = line_search_function.data_point(step)
 
-        x = line_search_function.data_point(step).x
+        if step_data_point.f == -np.inf:
+            if debug_options.report_wolfe_termination:
+                print("Terminated line search due to -inf")
+            return (
+                step_data_point.f,
+                step_data_point.g,
+                step_data_point.x,
+                step_data_point.step,
+                line_search_function.fun_eval,
+            )
+
+        x = step_data_point.x
 
         # Check if x is identical to one of the bounds despite different step values
         if step != step_l and (x == line_search_function.data_point(step_l).x).all():
@@ -740,7 +751,7 @@ def line_search(
         )
 
         step_l, step_u = get_next_interval(line_search_objective, step_l, step_u, step)
-        
+
         if step_l == step_u:
             if debug_options.report_wolfe_termination:
                 print("Terminated line search due to smallest interval reached")
