@@ -771,9 +771,8 @@ def line_search(
                     statistics.median_low(steps_in_interval),
                     steps_in_interval[-1],
                 ]
-                # TODO: Use update_line_search_objective
                 resulting_intervals = [
-                    get_next_interval(line_search_objective, step_l, step_u, s)
+                    get_next_interval(update_line_search_objective(line_search_function, s, line_search_objective), step_l, step_u, s)
                     for s in possible_steps
                 ]
                 resulting_interval_lengths = [abs(l, u) for l, u in resulting_intervals]
