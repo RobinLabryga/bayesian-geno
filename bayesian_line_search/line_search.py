@@ -560,9 +560,9 @@ def find_interval_with_wolfe(line_search_function, step_l, step_u, debug_options
             return step_l, step_u
 
 
-def get_next_interval(objective, step_l, step_u, step_t):
+def get_next_interval(objective, step_l, step_u, step_t, np):
     f, g = objective(step_t)
-    if f > objective(step_l)[0]:
+    if not np.isfinite(f) or f > objective(step_l)[0]:
         return step_l, step_t
     else:
         # TODO: Make sure g is not 0.0
@@ -647,7 +647,7 @@ def line_search(
 
     step_l, step_u = (
         (step_l, step_u)
-        if line_search_function.fg(step_l)[0] <= line_search_function.fg(step_u)[0]
+        if not np.isfinite(line_search_function.fg(step_u)[0]) or line_search_function.fg(step_l)[0] <= line_search_function.fg(step_u)[0]
         else (step_u, step_l)
     )
 
@@ -685,7 +685,7 @@ def line_search(
                     None,
                 )
             step_l, step_u = get_next_interval(
-                line_search_objective, step_l, step_u, step
+                line_search_objective, step_l, step_u, step, np
             )
             interval_size = abs(step_l - step_u)
             k += 1
@@ -772,7 +772,7 @@ def line_search(
                     steps_in_interval[-1],
                 ]
                 resulting_intervals = [
-                    get_next_interval(update_line_search_objective(line_search_function, s, line_search_objective), step_l, step_u, s)
+                    get_next_interval(update_line_search_objective(line_search_function, s, line_search_objective), step_l, step_u, s, np)
                     for s in possible_steps
                 ]
                 resulting_interval_lengths = [abs(l, u) for l, u in resulting_intervals]
@@ -782,7 +782,7 @@ def line_search(
             line_search_function, step, line_search_objective
         )
 
-        step_l, step_u = get_next_interval(line_search_objective, step_l, step_u, step)
+        step_l, step_u = get_next_interval(line_search_objective, step_l, step_u, step, np)
 
         if step_l == step_u:
             if debug_options.report_wolfe_termination:
