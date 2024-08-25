@@ -572,6 +572,13 @@ def update_line_search_objective(
     )
 
 
+def find_densest_step(known_steps, np):
+    h = abs(max(known_steps) - min(known_steps)) / 10
+    kernel = lambda u: 1 / np.sqrt(2 * np.pi) * np.exp(-0.5 * u**2)
+    density = lambda x: 1 / (len(known_steps) * h) * kernel((x - known_steps) / h).sum()
+    return known_steps[np.argmax([density(s) for s in known_steps])]
+
+
 def line_search(
     x_old,
     d,
@@ -686,12 +693,16 @@ def line_search(
             x = step_data_point.x
 
             # Check if x is identical to one of the bounds despite different step values
-            if step_t != step_l and (x == line_search_function.data_point(step_l).x).all():
+            if (
+                step_t != step_l
+                and (x == line_search_function.data_point(step_l).x).all()
+            ):
                 assert (
                     False
                 ), "If the optimization returns step_t != step_u, we must have psi(step_t) <= psi(step_u) < psi(step_l)"
             elif (
-                step_t != step_u and (x == line_search_function.data_point(step_u).x).all()
+                step_t != step_u
+                and (x == line_search_function.data_point(step_u).x).all()
             ):
                 step_t = step_u
 
@@ -710,21 +721,16 @@ def line_search(
                     ), "psi'(step_t) can not be 0, since that implies strong Wolfe step"
 
                 if debug_options.report_area_reduction:
-                    print(
-                        f"Interval size increase finished on={(step_l, step_u)}"
-                    )
+                    print(f"Interval size increase finished on={(step_l, step_u)}")
 
                 break
 
             if debug_options.report_area_reduction:
-                print(
-                    f"Interval size increased to={(step_l, step_u)}"
-                )
+                print(f"Interval size increased to={(step_l, step_u)}")
     else:
         step_l, step_u = (
             (step_l, step_u)
-            if not np.isfinite(psi_step_u_f)
-            or psi_step_l_f <= psi_step_u_f
+            if not np.isfinite(psi_step_u_f) or psi_step_l_f <= psi_step_u_f
             else (step_u, step_l)
         )
 
@@ -848,26 +854,7 @@ def line_search(
             if len(steps_in_interval) == 0:
                 step = (step_l + step_u) / 2.0
             else:
-                # TODO: Choose step based on sample density
-                possible_steps = [
-                    steps_in_interval[0],
-                    statistics.median_low(steps_in_interval),
-                    steps_in_interval[-1],
-                ]
-                resulting_intervals = [
-                    get_next_interval(
-                        update_line_search_objective(
-                            line_search_function, s, line_search_objective
-                        ),
-                        step_l,
-                        step_u,
-                        s,
-                        np,
-                    )
-                    for s in possible_steps
-                ]
-                resulting_interval_lengths = [abs(l, u) for l, u in resulting_intervals]
-                step = possible_steps[np.argmin(resulting_interval_lengths)]
+                step = find_densest_step(steps_in_interval, np)
 
         line_search_objective = update_line_search_objective(
             line_search_function, step, line_search_objective
