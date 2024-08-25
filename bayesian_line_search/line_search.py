@@ -703,7 +703,7 @@ def line_search(
             if step_t == step_u:
                 step_l, step_u = step_u, 2.0 * step_u
             else:
-                psi_step_t_f, psi_step_t_g = line_search_function.psi(step_t)[1]
+                psi_step_t_g = line_search_function.psi(step_t)[1]
                 if psi_step_t_g > 0:
                     step_l, step_u = step_t, step_l
                 elif psi_step_t_g < 0:
