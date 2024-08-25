@@ -3,7 +3,7 @@ from gaussian_process.kernels import Matern2_5Kernel
 import gaussian_process.GPfunctions as gp
 import numpy
 import types
-import statistics
+from scipy import stats
 from acquisition import AcquisitionFunction, LowerConfidenceBound
 from acquisition.optimization import DIRECT_LBFGSB_AcquisitionOptimizer
 from gaussian_process.prior_mean import ZeroMean
@@ -572,13 +572,6 @@ def update_line_search_objective(
     )
 
 
-def find_densest_step(known_steps, np):
-    h = abs(max(known_steps) - min(known_steps)) / 10
-    kernel = lambda u: 1 / np.sqrt(2 * np.pi) * np.exp(-0.5 * u**2)
-    density = lambda x: 1 / (len(known_steps) * h) * kernel((x - known_steps) / h).sum()
-    return known_steps[np.argmax([density(s) for s in known_steps])]
-
-
 def line_search(
     x_old,
     d,
@@ -854,7 +847,7 @@ def line_search(
             if len(steps_in_interval) == 0:
                 step = (step_l + step_u) / 2.0
             else:
-                step = find_densest_step(steps_in_interval, np)
+                step = steps_in_interval[np.argmax(stats.gaussian_kde(steps_in_interval)(steps_in_interval))]
 
         line_search_objective = update_line_search_objective(
             line_search_function, step, line_search_objective
