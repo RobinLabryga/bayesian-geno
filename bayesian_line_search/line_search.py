@@ -6,7 +6,7 @@ import types
 from scipy import stats
 from acquisition import AcquisitionFunction, LowerConfidenceBound
 from acquisition.optimization import DIRECT_LBFGSB_AcquisitionOptimizer
-from gaussian_process.prior_mean import ZeroMean
+from gaussian_process.prior_mean import ConstantMean
 
 from util import value_or_value, value_or_func
 
@@ -51,15 +51,6 @@ class LineSearchDebugOptions:
         self.plot_gp = plot_gp
         self.plot_threshold = plot_threshold
         # TODO: Options to disable acquisition, objective, gp, derivatives
-
-
-def normalization_parameters(f_known):
-    lowest_f = min(f_known)
-    largest_f = max(f_known)
-    if lowest_f != largest_f:
-        return -lowest_f, 1 / (largest_f - lowest_f)
-
-    return -lowest_f, 1.0
 
 
 def init_debug(search_interval, fg, np):
@@ -353,8 +344,6 @@ def gp_line_search(
 
     k = 0  # Count how many iterations of line search were performed
 
-    normalization_offset, normalization_scale = 0.0, 1.0
-
     GP_posterior = None
     acquisitionFunction = None
 
@@ -411,9 +400,9 @@ def gp_line_search(
                 print_debug_info(
                     GP_posterior,
                     S_debug,
-                    (f_debug + normalization_offset) * normalization_scale,
+                    f_debug,
                     step_known,
-                    (f_known + normalization_offset) * normalization_scale,
+                    f_known,
                     acquisitionFunction,
                 )
             return step, True
@@ -430,14 +419,8 @@ def gp_line_search(
 
         f_best = min(f_best, f)
 
-        # Normalize condition values to have consistent scale of std-deviation (sqrt of variance, thus scale has large effect)
-        normalization_offset, normalization_scale = normalization_parameters(f_known)
-        f_known_normalized = (f_known + normalization_offset) * normalization_scale
-        step_g_known_normalized = g_known * normalization_scale
-
         # The prior mean of the Gaussian Process
-        prior_mean = ZeroMean()
-        # Same as ConstantMean(min(f_known), np) in un-normalized case
+        prior_mean = ConstantMean(f_best, np)
 
         # TODO: Consider hyperparameter optimization (log marginal likelihood)
         # Using average distance, min distance, more as length scale
@@ -464,8 +447,8 @@ def gp_line_search(
                     l_posterior = GaussianProcess(
                         kernel=kernel,
                         x_known=step_known,
-                        f_known=f_known_normalized,
-                        g_known=step_g_known_normalized,
+                        f_known=f_known,
+                        g_known=g_known,
                         f_noise=noise,
                         g_noise=noise,
                         prior_mean=prior_mean,
@@ -507,9 +490,9 @@ def gp_line_search(
             print_debug_info(
                 GP_posterior,
                 S_debug,
-                (f_debug + normalization_offset) * normalization_scale,
+                f_debug,
                 step_known,
-                f_known_normalized,
+                f_known,
                 acquisitionFunction,
             )
 
@@ -521,9 +504,9 @@ def gp_line_search(
         print_debug_info(
             GP_posterior,
             S_debug,
-            (f_debug + normalization_offset) * normalization_scale,
+            f_debug,
             step_known,
-            (f_known + normalization_offset) * normalization_scale,
+            f_known,
             acquisitionFunction,
         )
 
