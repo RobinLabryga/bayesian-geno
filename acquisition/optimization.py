@@ -263,17 +263,21 @@ class DIRECT_LBFGSB_AcquisitionOptimizer(AcquisitionOptimizer):
             nAcquisitionF, bounds, maxiter=self.max_iterations, locally_biased=False
         )
 
-        local_result = scipy.optimize.minimize(
-            nAcquisitionFG,
-            global_result.x,
-            method="L-BFGS-B",
-            jac=True,
-            bounds=bounds,
-            tol=self.desired_accuracy,
-            options={"maxiter": self.max_iterations},
-        )
+        try:
+            local_result = scipy.optimize.minimize(
+                nAcquisitionFG,
+                global_result.x,
+                method="L-BFGS-B",
+                jac=True,
+                bounds=bounds,
+                tol=self.desired_accuracy,
+                options={"maxiter": self.max_iterations},
+            )
 
-        return local_result.x.item()
+            return local_result.x.item()
+        except ValueError:
+            # TODO: WTF causes this value error?
+            return global_result.x.item()
 
 
 class DE_LBFGSB_AcquisitionOptimizer(AcquisitionOptimizer):
