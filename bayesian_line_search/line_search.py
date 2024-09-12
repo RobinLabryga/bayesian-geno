@@ -632,7 +632,7 @@ def line_search(
         )
 
         if debug_options.report_return_value:
-            print(f"returned step={step} with f={line_search_function.fg(step)[0]}")
+            print(f"returned step={step} with f={line_search_function.fg(step)[0] if step is not None else None}")
 
         if wolfe_met:
             if debug_options.report_wolfe_termination:
