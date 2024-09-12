@@ -5,7 +5,7 @@ import numpy
 import types
 from scipy import stats
 from acquisition import AcquisitionFunction, LowerConfidenceBound
-from acquisition.optimization import DIRECT_LBFGSB_AcquisitionOptimizer
+from acquisition.optimization import HalfWayAcquisitionOptimizer
 from gaussian_process.prior_mean import ConstantMean
 
 from util import value_or_value, value_or_func
@@ -474,7 +474,7 @@ def gp_line_search(
         acquisitionFunction = LowerConfidenceBound(GP_posterior, lcb_factor=2.0, np=np)
 
         # New step is step size with max acquisition
-        acquisitionOptimizer = DIRECT_LBFGSB_AcquisitionOptimizer()
+        acquisitionOptimizer = HalfWayAcquisitionOptimizer()
         step = acquisitionOptimizer.maximize(
             acquisitionFunction,
             step_min,
