@@ -2,6 +2,8 @@
 
 This repo contains a version of the [genosolver](https://github.com/slaue/genosolver) that uses Bayesian Optimization to perform line search.
 
+It was developed as part of the Masters thesis titled "Information Preserving Line Search via Bayesian Optimization" by Robin Labryga at the University of Hamburg in 2024.
+
 ## Code
 
 - [gaussian_process.GaussianProcess](./gaussian_process/gaussian_process.py) Is the Gaussian Process class
