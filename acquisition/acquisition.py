@@ -396,7 +396,7 @@ class ExpectedImprovement_maximization(NumpyAcquisitionFunction):
         Z = t0 / pred.std_deviation
         dZ = (
             pred.derivative_mean / pred.std_deviation
-            + t0 * pred.std_deviation_derivative / pred.variance
+            - t0 * pred.std_deviation_derivative / pred.variance
         )
         pdf = self.norm.pdf(Z)
         dcdf = dZ * pdf
