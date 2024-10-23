@@ -7,6 +7,9 @@ from scipy import stats
 from acquisition import AcquisitionFunction, LowerConfidenceBound
 from acquisition.optimization import DIRECT_LBFGSB_AcquisitionOptimizer
 from gaussian_process.prior_mean import ConstantMean
+from external.spline import Cubic
+from queue import PriorityQueue
+from itertools import pairwise
 
 from util import value_or_value, value_or_func
 
@@ -338,14 +341,25 @@ def gp_line_search(
         # Let caller decide how to change search area
         return return_best_step(step_known, f_known, np)
 
+    assert(step_max in step_known)
+
     step = step_max  # We start at the max step size
 
     f_best = min(f_known)
 
     k = 0  # Count how many iterations of line search were performed
 
-    GP_posterior = None
-    acquisitionFunction = None
+    best_cubic_queue = PriorityQueue()
+
+    # Populate Priority Queue
+    step_known_sorted_indices = np.argsort(step_known)
+    for ((left_step, left_f, left_g), (right_step, right_f, right_g)) in pairwise(zip(step_known[step_known_sorted_indices], f_known[step_known_sorted_indices], g_known[step_known_sorted_indices])):
+        cubic = Cubic(left_step, right_step, left_f, left_g, right_f, right_g, alpha=(1.+abs(left_f - right_f))*abs(left_step-right_step), gamma=.5)
+        cubic_min_step, cubic_min = cubic.min
+        best_cubic_queue.put((cubic_min, -cubic_min_step, cubic))
+        
+    current_best_cubic = best_cubic_queue.get()[-1]
+    step = current_best_cubic.min[0]
 
     while True:
         # TODO: Reuse old GP if nothing but k changed
@@ -419,68 +433,21 @@ def gp_line_search(
 
         f_best = min(f_best, f)
 
-        # The prior mean of the Gaussian Process
-        prior_mean = ConstantMean(f_best, np)
+        # Add the two cubics on left and right of step to queue
+        left_step = current_best_cubic.x0
+        left_f, left_g = fg(left_step)
+        cubic = Cubic(left_step, step, left_f, left_g, f, step_g, alpha=(1.+abs(left_f - f))*abs(left_step-step), gamma=.5)
+        cubic_min_step, cubic_min = cubic.min
+        best_cubic_queue.put((cubic_min, -cubic_min_step, cubic))
 
-        # TODO: Consider hyperparameter optimization (log marginal likelihood)
-        # Using average distance, min distance, more as length scale
-        length_scales = [
-            # np.min([np.abs(a - b) for a, b in itertools.pairwise(sorted(step_known))]),
-            # (step_max - step_min) / (len(step_known) - 1),
-            # statistics.mode([abs(a - b) for a, b in itertools.pairwise(step_known)])
-            step_max
-            - step_min,
-        ]
+        right_step = current_best_cubic.x1
+        right_f, right_g = fg(left_step)
+        cubic = Cubic(step, right_step, f, step_g, right_f, right_g, alpha=(1.+abs(right_f - f))*abs(right_step-step), gamma=.5)
+        cubic_min_step, cubic_min = cubic.min
+        best_cubic_queue.put((cubic_min, -cubic_min_step, cubic))
 
-        # Find length scale with best log marginal likelihood
-        GP_posterior = None
-        GP_posterior_lml = None
-        for l in length_scales:
-            # The kernel used for the GP
-            kernel = Matern2_5Kernel(l=l)
-
-            l_posterior = None
-            # Compute new posterior
-            noise = 1e-14 * (step_max - step_min)  # Initial noise relative to x
-            while True:
-                try:
-                    l_posterior = GaussianProcess(
-                        kernel=kernel,
-                        x_known=step_known,
-                        f_known=f_known,
-                        g_known=g_known,
-                        f_noise=noise,
-                        g_noise=noise,
-                        prior_mean=prior_mean,
-                        np=np,
-                        verbose=debug_options.gp_verbose,
-                    )
-                except np.linalg.LinAlgError:
-                    # Numerical instability may result in covariance matrix not being positive definite. Adding more noise may fix that
-                    noise *= 10
-                else:
-                    l_posterior_lml = l_posterior.log_marginal_likelihood()
-                    GP_posterior, GP_posterior_lml = (
-                        (l_posterior, l_posterior_lml)
-                        if GP_posterior is None or l_posterior_lml > GP_posterior_lml
-                        else (GP_posterior, GP_posterior_lml)
-                    )
-                    break  # Success
-
-        if debug_options.report_kernel_hyperparameter:
-            print(f"kernel with l={GP_posterior.kernel.l} with {GP_posterior_lml}")
-
-        # Compute acquisition function
-        acquisitionFunction = LowerConfidenceBound(GP_posterior, lcb_factor=2.0, np=np)
-
-        # New step is step size with max acquisition
-        acquisitionOptimizer = DIRECT_LBFGSB_AcquisitionOptimizer()
-        step = acquisitionOptimizer.maximize(
-            acquisitionFunction,
-            step_min,
-            step_max,
-            step_known,
-        )
+        current_best_cubic = best_cubic_queue.get()[-1]
+        step = current_best_cubic.min[0]
 
         if debug_options.report_acquisition_max:
             print(f"Maximized acquisition function at {step}")
