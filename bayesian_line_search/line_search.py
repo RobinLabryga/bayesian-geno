@@ -28,6 +28,7 @@ class LineSearchDebugOptions:
         gp_verbose: bool = False,
         plot_gp: bool = False,
         plot_threshold: int = numpy.inf,
+        report_clipping: bool = False,
     ) -> None:
         """A structure encapsulating options about line search debug
 
@@ -53,6 +54,7 @@ class LineSearchDebugOptions:
         self.gp_verbose = gp_verbose
         self.plot_gp = plot_gp
         self.plot_threshold = plot_threshold
+        self.report_clipping = report_clipping
         # TODO: Options to disable acquisition, objective, gp, derivatives
 
 
@@ -273,6 +275,17 @@ def return_best_step(step_known, f_known, np):
     return find_best_step(step_known, f_known, np), False
 
 
+def clip_step(step, cubic, debug_options, np):
+    # Clip step within 10% if cubic edges
+    x0 = cubic.x0
+    x1 = cubic.x1
+    if not (x0 + (x1 - x0) * .1 <= step <= x1 - (x1 - x0) * .1):
+        step = np.clip(step, x0 + (x1 - x0) * .1, x1 - (x1 - x0) * .1)
+        if debug_options.report_clipping:
+            print('step on boundary, clipped')
+    return step
+
+
 def gp_line_search(
     fg,
     search_interval: tuple[float, float],
@@ -306,6 +319,7 @@ def gp_line_search(
     step_min = search_interval[0]
     step_max = search_interval[1]
     assert step_min < step_max, f"{step_min} >= {step_max}"
+    assert step_min in step_known and step_max in step_known
 
     # Vectors to hold the information we have already queried previously
     step_known, f_known, g_known = zip(
@@ -357,9 +371,9 @@ def gp_line_search(
         cubic = Cubic(left_step, right_step, left_f, left_g, right_f, right_g, alpha=(1.+abs(left_f - right_f))*abs(left_step-right_step), gamma=.5)
         cubic_min_step, cubic_min = cubic.min
         best_cubic_queue.put((cubic_min, -cubic_min_step, cubic))
-        
+
     current_best_cubic = best_cubic_queue.get()[-1]
-    step = current_best_cubic.min[0]
+    step = clip_step(current_best_cubic.min[0], current_best_cubic, debug_options, np)
 
     while True:
         # TODO: Reuse old GP if nothing but k changed
@@ -412,12 +426,12 @@ def gp_line_search(
                 if S_debug is None:
                     S_debug, f_debug = init_debug(search_interval, fg, np)
                 print_debug_info(
-                    GP_posterior,
+                    None,
                     S_debug,
                     f_debug,
                     step_known,
                     f_known,
-                    acquisitionFunction,
+                    None,
                 )
             return step, True
 
@@ -447,7 +461,7 @@ def gp_line_search(
         best_cubic_queue.put((cubic_min, -cubic_min_step, cubic))
 
         current_best_cubic = best_cubic_queue.get()[-1]
-        step = current_best_cubic.min[0]
+        step = clip_step(current_best_cubic.min[0], current_best_cubic, debug_options, np)
 
         if debug_options.report_acquisition_max:
             print(f"Maximized acquisition function at {step}")
@@ -455,12 +469,12 @@ def gp_line_search(
             if S_debug is None:
                 S_debug, f_debug = init_debug(search_interval, fg, np)
             print_debug_info(
-                GP_posterior,
+                None,
                 S_debug,
                 f_debug,
                 step_known,
                 f_known,
-                acquisitionFunction,
+                None,
             )
 
         k += 1
@@ -469,12 +483,12 @@ def gp_line_search(
         if S_debug is None:
             S_debug, f_debug = init_debug(search_interval, fg, np)
         print_debug_info(
-            GP_posterior,
+            None,
             S_debug,
             f_debug,
             step_known,
             f_known,
-            acquisitionFunction,
+            None,
         )
 
     return return_best_step(step_known, f_known, np)
