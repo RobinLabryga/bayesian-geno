@@ -36,9 +36,7 @@
 """
 
 import warnings
-
-from bayesian_line_search import line_search
-
+from bayesian_line_search import line_search as line_search_wolfe3
 
 class OptimizeResult(dict):
     """
@@ -46,7 +44,6 @@ class OptimizeResult(dict):
     basically just a copy of the SciPy interface such that they can be used
     interchangeably.
     """
-
     def __getattr__(self, name):
         try:
             return self[name]
@@ -59,9 +56,8 @@ class OptimizeResult(dict):
     def __repr__(self):
         if self.keys():
             m = max(map(len, list(self.keys()))) + 1
-            return "\n".join(
-                [k.rjust(m) + ": " + repr(v) for k, v in sorted(self.items())]
-            )
+            return '\n'.join([k.rjust(m) + ': ' + repr(v)
+                              for k, v in sorted(self.items())])
         return self.__class__.__name__ + "()"
 
     def __dir__(self):
@@ -86,7 +82,6 @@ class LBFGSB:
             Optimization for Classical Machine Learning Problems on the GPU.
             In AAAI 2022.
     """
-
     def __init__(self, fg, x0, np, lb=None, ub=None, options=None):
         if options is None:
             options = {}
@@ -94,27 +89,31 @@ class LBFGSB:
         self.x = x0
         self.np = np
         self.n = len(self.x)
-        self.constrained = not (lb is None and ub is None)
-        self.lb = lb if not lb is None else np.full(self.n, -np.inf)
-        self.ub = ub if not ub is None else np.full(self.n, np.inf)
+        #self.constrained = not (lb is None and ub is None)
+        self.lb = np.atleast_1d(lb) if not lb is None else np.full(self.n, -np.inf)
+        self.ub = np.atleast_1d(ub) if not ub is None else np.full(self.n, np.inf)
+        self.constrained = not (np.all(self.lb == -np.inf) and np.all(self.ub == np.inf)) 
         self.set_options(options)
         self.init_matrices()
         self.working = np.full(self.n, 1.0)
-        self.inf_array = np.full(self.n, np.inf)
+        self.eps_f_count = 0
 
     def all_options(self):
         return {
-            "verbose",
-            "max_iter",
-            "step_max",
-            "max_ls",
-            "eps_pg",
-            "m",
-            "grad_test",
-            "ls",
-            "line_search_debug_options",
-            "max_sample_count",
-        }
+            "verbose", 
+                "max_iter", 
+                "step_max",
+                "max_ls",
+                "eps_pg", 
+                "eps_f", 
+                "n_eps_f", 
+                "m", 
+                "grad_test",
+                "callback",
+                "ls",
+                "line_search_debug_options",
+                "max_sample_count",
+                }
 
     def set_options(self, options):
         unsupported = [opt for opt in options.keys() if opt not in self.all_options()]
@@ -126,13 +125,16 @@ class LBFGSB:
         self.param.setdefault("max_iter", 1000)
         self.param.setdefault("step_max", 1e10)
         self.param.setdefault("max_ls", 30)
-        self.param.setdefault("eps_pg", 1e-5)
+        self.param.setdefault("eps_pg", 1E-5)
+        self.param.setdefault("eps_f", 1E-14)
+        self.param.setdefault("n_eps_f", 10)
         self.param.setdefault("m", 10)
         self.param.setdefault("grad_test", False)
+        self.param.setdefault("callback", None)
         self.param.setdefault("ls", 0)
         self.param.setdefault("line_search_debug_options", None)
         self.param.setdefault("max_sample_count", 20)
-        self.max_m = self.param["m"]
+        self.max_m = self.param['m']
 
     def init_matrices(self):
         np = self.np
@@ -145,19 +147,15 @@ class LBFGSB:
     def add_corrections(self, s, y):
         if self.storage_idx >= 2 * self.max_m:
             # move everything upfront
-            self.storage_S[: self.max_m, :] = self.storage_S[self.max_m :, :]
-            self.storage_Y[: self.max_m, :] = self.storage_Y[self.max_m :, :]
+            self.storage_S[:self.max_m, :] = self.storage_S[self.max_m:, :]
+            self.storage_Y[:self.max_m, :] = self.storage_Y[self.max_m:, :]
             self.storage_idx = self.max_m
         self.storage_S[self.storage_idx, :] = s
         self.storage_Y[self.storage_idx, :] = y
 
         self.storage_idx += 1
-        self.S = self.storage_S[
-            max(0, self.storage_idx - self.max_m) : self.storage_idx, :
-        ]
-        self.Y = self.storage_Y[
-            max(0, self.storage_idx - self.max_m) : self.storage_idx, :
-        ]
+        self.S = self.storage_S[max(0, self.storage_idx - self.max_m):self.storage_idx, :]
+        self.Y = self.storage_Y[max(0, self.storage_idx - self.max_m):self.storage_idx, :]
 
     def force_bounds(self, x):
         np = self.np
@@ -166,51 +164,92 @@ class LBFGSB:
 
     def proj_grad_norm(self, x, g):
         np = self.np
-        eps = 1e-10
+        eps = 1E-10
         if self.constrained:
+            g = np.atleast_1d(g)
             self.working = np.full(self.n, 1.0)
-            self.working[(x < self.lb + eps * 2) & (g >= 0)] = 0
-            self.working[(x > self.ub - eps * 2) & (g <= 0)] = 0
-        pg = np.linalg.norm(np.minimum(np.maximum(x - g, self.lb), self.ub) - x, np.inf)
+            self.working[(x <= self.lb + eps * 2) & (g >= 0)] = 0
+            self.working[(x >= self.ub - eps * 2) & (g <= 0)] = 0
+            pg = np.linalg.norm(g[self.working > 0], np.inf) if any(self.working > 0) else 0.
+            #pg = np.linalg.norm(np.minimum(np.maximum(x - g, self.lb), self.ub) - x, np.inf)
+        else:
+            pg = np.linalg.norm(g, np.inf)
         return pg
 
     def max_step_size(self, x, d):
         np = self.np
         if self.constrained:
-            step_ub = np.divide(self.ub - x, d, out=self.inf_array, where=d > 0)
-            step_lb = np.divide(self.lb - x, d, out=self.inf_array, where=d < 0)
+            step_ub = np.full(self.n, np.inf)
+            step_lb = np.full(self.n, np.inf)
+            idx_ub = np.where(d > 0)
+            idx_lb = np.where(d < 0)
+            step_ub[idx_ub] = np.divide(self.ub[idx_ub] - x[idx_ub], d[idx_ub])
+            step_lb[idx_lb] = np.divide(self.lb[idx_lb] - x[idx_lb], d[idx_lb])
             step_max = min(np.min(step_ub), np.min(step_lb))
         else:
             step_max = np.inf
         return step_max
+
+    
+    def line_search(self, x_old, d, step_max, f_old, g_old):
+
+        f, g, x, step, fg_cnt = line_search_wolfe3(
+                x_old,
+                d,
+                self.fg,
+                step_max,
+                f_old,
+                g_old,
+                quadratic=self.param["ls"] == 2,
+                np=self.np,
+                debug_options=self.param["line_search_debug_options"],
+                max_iter=self.param["max_ls"],
+                max_sample_count=self.param["max_sample_count"],)
+        
+        if step is None:
+            x = x_old
+            f = f_old
+            g = g_old
+        else:
+            x = x_old + step * d
+            if f is None or g is None:
+                f, g = self.fg(x)
+                fg_cnt += 1
+        
+        return f, g, x, step, fg_cnt
 
     def two_loop(self, g):
         np = self.np
         k, _ = self.S.shape
         rho = np.empty(k)
         alpha = np.empty(k)
+        eps = 1E-40
         if self.constrained:
             Yw = self.Y * self.working
             q = g * self.working
         else:
             Yw = self.Y
             q = g.copy()
-
+        
         if k == 0:
             return q
 
         for i in range(k - 1, -1, -1):
             rho[i] = np.dot(self.S[i], Yw[i])
-            if rho[i] > 1e-10:
+            yy = np.dot(Yw[i], Yw[i])
+            if rho[i] > eps * yy:
                 alpha[i] = np.dot(self.S[i], q) / rho[i]
                 q -= alpha[i] * Yw[i]
 
-        if rho[k - 1] > 1e-10:
-            gamma = rho[k - 1] / np.linalg.norm(Yw[k - 1]) ** 2
+        yy = np.dot(Yw[k - 1], Yw[k - 1])
+        if rho[k - 1] > eps * yy:
+            gamma = rho[k - 1] / yy
             q *= gamma
-
+        
+        
         for i in range(k):
-            if rho[i] > 1e-10:
+            yy = np.dot(Yw[i], Yw[i])
+            if rho[i] > eps * yy:
                 beta = np.dot(Yw[i], q) / rho[i]
                 q += (alpha[i] - beta) * self.S[i]
 
@@ -220,10 +259,10 @@ class LBFGSB:
 
     def project_direction(self, x, g, d):
         np = self.np
-        eps = 1e-10
+        eps = 1E-20
         x_new = x + d
-        idx_lb = x_new < self.lb + 2 * eps
-        idx_ub = x_new > self.ub - 2 * eps
+        idx_lb = x_new <= self.lb + 2 * eps
+        idx_ub = x_new >= self.ub - 2 * eps
         x_new[idx_lb] = self.lb[idx_lb]
         x_new[idx_ub] = self.ub[idx_ub]
         d_new = x_new - x
@@ -241,32 +280,29 @@ class LBFGSB:
 
     def grad_test(self, x):
         np = self.np
-        t = 1e-6
+        t = 1E-6
         delta = np.random.randn(self.n)
         f1, _ = self.fg(x + t * delta)
         f2, _ = self.fg(x - t * delta)
         _, g = self.fg(x)
         d = (f1 - f2) / (2 * t) - np.dot(g, delta)
-        print(f"gradient test: approximation error {d:.5g}")
+        if isinstance(d, np.ndarray):
+            print(f'gradient test: approximation error {d[0]:.5g}')
+        else:
+            print(f'gradient test: approximation error {d:.5g}')
         return d
 
     def minimize(self):
         np = self.np
-        eps = 1e-10
+        eps = 1E-40
         # check for feasibility
         if np.any(self.lb > self.ub):
-            return OptimizeResult(
-                x=self.x,
-                fun=None,
-                jac=None,
-                nit=0,
-                nfev=0,
-                status=1,
-                success=False,
-                message="Infeasible",
-            )
+            return OptimizeResult(x=self.x, fun=None, jac=None,
+                                  nit=0, nfev=0,
+                                  status=1, success=False,
+                                  message="Infeasible")
         x = self.force_bounds(self.x)
-        if self.param["grad_test"]:
+        if self.param['grad_test']:
             self.grad_test(x)
 
         f, g = self.fg(x)
@@ -276,130 +312,150 @@ class LBFGSB:
         pg = self.proj_grad_norm(x, g)
 
         # check for early stopping
-        if pg <= self.param["eps_pg"]:
-            return OptimizeResult(
-                x=x,
-                fun=f,
-                jac=g,
-                nit=0,
-                nfev=fun_eval,
-                status=0,
-                success=True,
-                message="Solved",
-            )
-
+        if pg <= self.param['eps_pg']:
+            return OptimizeResult(x=x, fun=f, jac=g,
+                                  nit=0, nfev=fun_eval, status=0, success=True,
+                                  message="Solved")
+        
         # initial direction
         d = -g * self.working
         d /= np.linalg.norm(d)
 
-        if self.param["verbose"] >= 10:
-            print(
-                "%10s %10s %15s %15s %15s"
-                % (
-                    "Iteration",
-                    "FunEvals",
-                    "Step Length",
-                    "Function Val",
-                    "Proj Gradient",
-                )
-            )
+        if self.param['verbose'] >= 10:
+            print()
+            print("%9s%9s%15s%15s%15s" % ("Iteration", "Funeval",
+                                                "Step Length", "FunValue",
+                                                "Proj.Grad."))
 
+#        f_old = f + np.linalg.norm(g) / 2
+        f_old = f
+        x_old = x
         k = 0
         while True:
             k += 1
 
-            if self.param["grad_test"]:
+            if not self.param['callback'] is None:
+                if self.param['callback'](x, f):
+                    status = 0
+                    message = "Callback returned True"
+                    break
+
+            if self.param['grad_test']:
                 self.grad_test(x)
 
             step_max = self.max_step_size(x, d)
-            step_max = min(step_max, self.param["step_max"])
-            if self.param["verbose"] >= 100:
-                print("lb", self.lb)
-                print("x", x)
-                print("ub", self.ub)
-                print("g", g)
-                print("d", d)
-                print("step_max", step_max)
+            step_max = min(step_max, 1E10)
+            if self.param['verbose'] >= 100:
+                print('lb', self.lb)
+                print('x', x)
+                print('ub', self.ub)
+                print('g', g)
+                print('d', d)
+                print('step_max', step_max)
 
-            if step_max < 1e-5:
+            '''
+            if step_max < 1E-5:
                 if self.num_cors() > 0:
                     # maybe clearing up all correction pairs will help
-                    if self.param["verbose"] >= 10:
-                        print("refresh called")
+                    if self.param['verbose'] >= 10:
+                        print('refresh called')
                     self.init_matrices()
 
                     # initial direction
                     d = -g * self.working
                     d /= np.linalg.norm(d)
+                    f_old =  None
                     continue
-
+            '''
+            
             f_old = f
-            f, g, x, step, fun_eval_ls = line_search(
-                x,
-                d,
-                self.fg,
-                step_max,
-                f,
-                g,
-                quadratic=self.param["ls"] == 2,
-                np=self.np,
-                debug_options=self.param["line_search_debug_options"],
-                max_iter=self.param["max_ls"],
-                max_sample_count=self.param["max_sample_count"],
-            )
-
-            if f > f_old:
-                print("error")
+            f, g, x, step, fun_eval_ls = self.line_search(x, d, step_max, f, g)
+            
+            if f >= f_old:
+                print('Error, f_new >= f_old: %.15f >= %.15f' % (f, f_old))
+                print('with step size', step)
                 step = None
 
             if step is None:
+                status = 3
+                message = "Line search failed"
+                warnings.warn(message)
+            
+            if step is None:
+
                 x = x_old
                 f, g = self.fg(x)
                 fun_eval += 1
                 pg = self.proj_grad_norm(x, g)
-
-                self.grad_test(x)
+                
+                #self.grad_test(x)
                 # line search did not converge
                 if self.num_cors() > 0:
                     # maybe clearing up all correction pairs will help
-                    if self.param["verbose"] >= 10:
-                        print("refresh called")
+                    if self.param['verbose'] >= 10:
+                        print('refresh called')
                     self.init_matrices()
 
                     # initial direction
                     d = -g * self.working
                     d /= np.linalg.norm(d)
+                    g_old = g
+                    f_old = f
                     continue
                 else:
                     # really cannot do any progress due to numerical errors
                     status = 3
                     message = "Line search failed"
                     break
-
+            
+            ###
             x = self.force_bounds(x)
             pg = self.proj_grad_norm(x, g)
             fun_eval += fun_eval_ls
 
-            if self.param["verbose"] >= 10:
-                print("%10d %10d %15.5g %15.5e %15.5e" % (k, fun_eval, step, f, pg))
+            if self.param['verbose'] >= 10:
+                print("%9d%9d%15.5g%15.5E%15.5E" % (k, fun_eval, step, f, pg))
 
             # check for convergence
-            if k >= self.param["max_iter"]:
+            if k >= self.param['max_iter']:
+                f_old = f
+                x_old = x
+                g_old = g
                 status = 2
                 message = "Maximum iterations reached"
                 break
 
-            if pg <= self.param["eps_pg"]:
+            if pg <= self.param['eps_pg']:
+                f_old = f
+                x_old = x
+                g_old = g
                 status = 0
-                message = "Solved"
+                message = "Solved eps_pg"
                 break
+
+            if (f_old - f) / (np.abs(f) + 1) <= self.param['eps_f']:
+                self.eps_f_count += 1
+                if self.eps_f_count >= self.param['n_eps_f']:
+                    f_old = f
+                    g_old = g
+                    x_old = x
+                    status = 0
+                    message = "Solved eps_f"
+                    break
+            else:
+                self.eps_f_count = 0
+
 
             s = x - x_old
             y = g - g_old
+        
             if np.dot(s, y) > eps * np.dot(y, y):
                 self.add_corrections(s, y)
-            if self.param["verbose"] > 100:
-                print(self.S)
+            elif self.param['verbose'] > 100:
+                print('pair not added:', s, y)
+            if self.param['verbose'] > 100:
+                print('S =', self.S)
+                print('Y =', self.Y)
 
             d = -self.two_loop(g)
             dg = np.dot(g, d)
@@ -410,16 +466,12 @@ class LBFGSB:
 
             x_old = x
             g_old = g
-        return OptimizeResult(
-            x=x,
-            fun=f,
-            jac=g,
-            nit=k,
-            nfev=fun_eval,
-            status=status,
-            success=(status == 0),
-            message=message,
-        )
+        
+        return OptimizeResult(x=x_old, fun=f_old, jac=g_old,
+                              nit=k, nfev=fun_eval,
+                              status=status, success=(status==0),
+                              message=message)
+
 
 
 class Augmented_Lagrangian_NLP:
@@ -437,9 +489,8 @@ class Augmented_Lagrangian_NLP:
         c = self.c_f(x)
         cl = c - self.c_lb
         cu = c - self.c_ub
-        aug_Lag = self.np.minimum(cl + self.y / self.rho, 0.0) + self.np.maximum(
-            cu + self.y / self.rho, 0.0
-        )
+        aug_Lag = self.np.minimum(cl + self.y / self.rho, 0.) + \
+                  self.np.maximum(cu + self.y / self.rho, 0.)
         return cl, cu, aug_Lag
 
     def aug_Lag_fg(self, x):
@@ -469,7 +520,6 @@ class Augmented_Lagrangian:
     If converts the constrained problem into a sequence of bound-constrained
     problems and solves them using the L-BFGS-B solver.
     """
-
     def __init__(self, aug_Lag_NLP, x0, np, lb=None, ub=None, options=None):
         if options is None:
             options = {}
@@ -478,35 +528,26 @@ class Augmented_Lagrangian:
         self.lb = lb
         self.ub = ub
         self.np = np
-        (n,) = self.NLP.c_lb.shape
+        n, = self.NLP.c_lb.shape
         self.y = np.zeros(n)
         self.set_options(options)
 
     def set_options(self, options):
-        all_options = {
-            "verbose",
-            "max_iter",
-            "step_max",
-            "max_ls",
-            "eps_pg",
-            "m",
-            "grad_test",
-            "ls",
-            "max_iter_outer",
-            "constraint_tol",
-        }
+        all_options = {'verbose', 'max_iter', 'step_max', 'max_ls',
+                       'eps_pg', 'm', 'grad_test',
+                       'max_iter_outer', 'constraint_tol'}
         unsupported = [opt for opt in options.keys() if opt not in all_options]
         for opt in unsupported:
             warnings.warn(f"Option '{opt}' is not supported.", RuntimeWarning)
 
         self.param = options.copy()
-        self.param.setdefault("verbose", 0)
-        self.param.setdefault("max_iter_outer", 100)
-        self.param.setdefault("constraint_tol", 1e-3)
+        self.param.setdefault('verbose', 0)
+        self.param.setdefault('max_iter_outer', 100)
+        self.param.setdefault('constraint_tol', 1E-3)
 
         self.param_LBFGSB = options.copy()
-        self.param_LBFGSB.pop("max_iter_outer", None)
-        self.param_LBFGSB.pop("constraint_tol", None)
+        self.param_LBFGSB.pop('max_iter_outer', None)
+        self.param_LBFGSB.pop('constraint_tol', None)
 
     def minimize(self):
         np = self.np
@@ -519,16 +560,14 @@ class Augmented_Lagrangian:
         rho_increases = 0
         while True:
             k += 1
-            if self.param["verbose"] >= 5:
-                print("outer iteration", k)
-                print("rho", rho)
-                print("y", self.y)
+            if self.param['verbose'] >= 5:
+                print('outer iteration', k)
+                print('rho', rho)
+                print('y', self.y)
 
             self.NLP.rho = rho
             self.NLP.y = self.y
-            solver = LBFGSB(
-                self.NLP.aug_Lag_fg, self.x, np, self.lb, self.ub, self.param_LBFGSB
-            )
+            solver = LBFGSB(self.NLP.aug_Lag_fg, self.x, np, self.lb, self.ub, self.param_LBFGSB)
             res = solver.minimize()
 
             self.x = res.x
@@ -537,27 +576,27 @@ class Augmented_Lagrangian:
             jac = res.jac
 
             cl, cu, aug_constraint_error = self.NLP.constraint_error(self.x)
-            constraint_error = np.minimum(cl, 0.0) + np.maximum(cu, 0.0)
-            if self.param["verbose"] >= 90:
-                print("x", self.x)
-                print("c_f", self.NLP.c_f(self.x))
-                print("cl", cl)
-                print("cu", cu)
-            if self.param["verbose"] >= 5:
-                print("constraint_error", constraint_error)
+            constraint_error = np.minimum(cl, 0.) + np.maximum(cu, 0.)
+            if self.param['verbose'] >= 90:
+                print('x', self.x)
+                print('c_f', self.NLP.c_f(self.x))
+                print('cl', cl)
+                print('cu', cu)
+            if self.param['verbose'] >= 5:
+                print('constraint_error', constraint_error)
 
             constraint_error_norm = np.linalg.norm(constraint_error, np.inf)
-            if constraint_error_norm < self.param["constraint_tol"]:
+            if constraint_error_norm < self.param['constraint_tol']:
                 status = res.status
                 message = res.message
                 break
 
-            if res.status == 1:  # augmented Lagrangian could not be solved
+            if res.status==1: # augmented Lagrangian could not be solved
                 status = 1
                 message = "Infeasible"
                 break
 
-            if k >= self.param["max_iter_outer"]:
+            if k >= self.param['max_iter_outer']:
                 status = 2
                 message = "Maximum outer iterations reached"
                 break
@@ -573,23 +612,16 @@ class Augmented_Lagrangian:
             if rho_increases > 20:
                 status = 1
                 message = "Infeasible"
-                break  # problem seems infeasible
+                break # problem seems infeasible
 
         f, _ = self.NLP.fg(self.x)
-        return OptimizeResult(
-            x=self.x,
-            y=self.y,
-            fun=f,
-            jac=jac,
-            nit=k,
-            nfev=fun_eval,
-            nInner=n_inner,
-            maxcv=constraint_error_norm,
-            slack=0,
-            status=status,
-            success=(status == 0),
-            message=message,
-        )
+        return OptimizeResult(x=self.x, y=self.y, fun=f, jac=jac,
+                              nit=k, nfev=fun_eval, nInner=n_inner,
+                              maxcv=constraint_error_norm,
+                              slack=0,
+                              status=status, success=(status==0),
+                              message=message)
+
 
 
 def minimize(fg, x0, lb=None, ub=None, options=None, constraints=None, np=None):
@@ -597,16 +629,16 @@ def minimize(fg, x0, lb=None, ub=None, options=None, constraints=None, np=None):
         import numpy as np
     if options is None:
         options = {}
-    x0 = np.ascontiguousarray(x0)
+    x0 = np.ascontiguousarray(np.array(x0))
     if not lb is None:
-        lb = np.ascontiguousarray(lb)
+        lb = np.ascontiguousarray(np.array(lb))
     if not ub is None:
-        ub = np.ascontiguousarray(ub)
+        ub = np.ascontiguousarray(np.array(ub))
     if not constraints:
         solver = LBFGSB(fg, x0, np, lb, ub, options)
     else:
         if isinstance(constraints, dict):
-            constraints = (constraints,)
+            constraints = (constraints, )
 
         shape_constraints = []
         offset = [0]
@@ -614,21 +646,26 @@ def minimize(fg, x0, lb=None, ub=None, options=None, constraints=None, np=None):
         c_ub_all = []
         for c in constraints:
             # determine shape of constraint i and its length
-            dummy_f_c = c["fun"](x0)
+            dummy_f_c = c['fun'](x0)
             shape_constraints.append(dummy_f_c.shape)
             m = len(dummy_f_c.reshape(-1))
             offset.append(offset[-1] + m)
-
-            # check the type of constraints
-            if c["type"] == "eq":
-                c_lb = np.zeros(m)
-                c_ub = np.zeros(m)
-            elif c["type"] == "ineq":
-                c_lb = np.full(m, -np.inf)
-                c_ub = np.zeros(m)
-            else:
-                assert False
-
+            try:
+                c_lb = c['lb']
+                c_ub = c['ub']
+            except KeyError:
+                # old
+                # because of backward compatibility
+                # check the type of constraints
+                if c['type'] == 'eq':
+                    c_lb = np.zeros(m)
+                    c_ub = np.zeros(m)
+                elif c['type'] == 'ineq':
+                    c_lb = np.full(m, -np.inf)
+                    c_ub = np.zeros(m)
+                else:
+                    assert False
+            
             c_lb_all.append(c_lb)
             c_ub_all.append(c_ub)
 
@@ -637,22 +674,18 @@ def minimize(fg, x0, lb=None, ub=None, options=None, constraints=None, np=None):
         c_ub_all = np.concatenate(c_ub_all)
 
         def c_f_all(x):
-            l = [c["fun"](x).reshape(-1) for c in constraints]
+            l = [c['fun'](x).reshape(-1) for c in constraints]
             f = np.concatenate(l)
             return f
-
         def c_jac_all(x, v):
             g = np.zeros_like(x)
             for i, c in enumerate(constraints):
-                g = g + c["jacprod"](
-                    x, v[offset[i] : offset[i + 1]].reshape(shape_constraints[i])
-                ).reshape(-1)
+                g = g + c['jacprod'](x, v[offset[i]:offset[i+1]].reshape(shape_constraints[i])).reshape(-1)
             return g
 
         y = np.zeros(mTotal)
 
-        augmented_Lagrangian_NLP = Augmented_Lagrangian_NLP(
-            fg, c_f_all, c_jac_all, c_lb_all, c_ub_all, y, np
-        )
+        augmented_Lagrangian_NLP = Augmented_Lagrangian_NLP(fg, c_f_all, c_jac_all,
+                                                            c_lb_all, c_ub_all, y, np)
         solver = Augmented_Lagrangian(augmented_Lagrangian_NLP, x0, np, lb, ub, options)
     return solver.minimize()
