@@ -685,7 +685,7 @@ def line_search(
         interval_size_prev_prev, interval_size_prev = interval_size_prev, interval_size
 
         step, wolfe_met = gp_line_search(
-            line_search_objective,
+            line_search_function.phi,
             (min(step_l, step_u), max(step_l, step_u)),
             line_search_function.known_steps(),
             line_search_function.strong_wolfe_condition_met,
