@@ -435,12 +435,7 @@ def gp_line_search(
                 )
             return step, True
 
-        if len(step_known) > max_sample_count:
-            if debug_options.report_termination_reason:
-                print("Line search terminated due to exceeded sample count")
-            break
-
-        if k > max_sample_count:  # TODO: Will this ever execute?
+        if k > max_sample_count:
             if debug_options.report_termination_reason:
                 print("Line search terminated due to exceeded iteration count")
             break
