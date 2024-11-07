@@ -648,28 +648,15 @@ def line_search(
             )
             break
 
-        step_t, wolfe_met = gp_line_search(
-            line_search_function.psi,
-            (min(step_l, step_u), max(step_l, step_u)),
-            line_search_function.known_steps(),
-            line_search_function.strong_wolfe_condition_met,
-            np,
-            debug_options,
-            max_sample_count,
-        )
-
-        if debug_options.report_return_value:
-            print(f"returned step={step} with f={line_search_function.fg(step)[0] if step is not None else None}")
-
-        if wolfe_met:
+        if line_search_function.strong_wolfe_condition_met(step_u):
             if debug_options.report_wolfe_termination:
                 print(f"Wolfe after {k} iterations")
-            data_point = line_search_function.data_point(step_t)
+            data_point = line_search_function.data_point(step_u)
             return (
                 data_point.f,
                 data_point.g,
                 data_point.x,
-                step_t,
+                step_u,
                 line_search_function.fun_eval,
             )
 
@@ -687,49 +674,7 @@ def line_search(
 
         k += 1
 
-        step_data_point = line_search_function.data_point(step_t)
-
-        if step_data_point.f == -np.inf:
-            if debug_options.report_wolfe_termination:
-                print("Terminated line search due to -inf")
-            return (
-                step_data_point.f,
-                step_data_point.g,
-                step_data_point.x,
-                step_data_point.step,
-                line_search_function.fun_eval,
-            )
-
-        x = step_data_point.x
-
-        # Check if x is identical to one of the bounds despite different step values
-        if step_t != step_l and (x == line_search_function.data_point(step_l).x).all():
-            assert (
-                False
-            ), "If the optimization returns step_t != step_u, we must have psi(step_t) <= psi(step_u) < psi(step_l)"
-        elif (
-            step_t != step_u and (x == line_search_function.data_point(step_u).x).all()
-        ):
-            step_t = step_u
-
-        # If step_t == step_u, we move interval to right, otherwise we can guarantee strong Wolfe step in new interval
-        if step_t == step_u:
-            step_l, step_u = step_u, 2.0 * step_u
-        else:
-            psi_step_t_g = line_search_function.psi(step_t)[1]
-            if psi_step_t_g > 0:
-                step_l, step_u = step_t, step_l
-            elif psi_step_t_g < 0:
-                step_l, step_u = step_t, step_u
-            else:
-                assert (
-                    False
-                ), "psi'(step_t) can not be 0, since that implies strong Wolfe step"
-
-            if debug_options.report_area_reduction:
-                print(f"Interval size increase finished on={(step_l, step_u)}")
-
-            break
+        step_u = 2. * step_u
 
         if debug_options.report_area_reduction:
             print(f"Interval size increased to={(step_l, step_u)}")
