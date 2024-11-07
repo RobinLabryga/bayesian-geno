@@ -25,6 +25,7 @@ class LineSearchDebugOptions:
         gp_verbose: bool = False,
         plot_gp: bool = False,
         plot_threshold: int = numpy.inf,
+        report_clipping: bool = False,
     ) -> None:
         """A structure encapsulating options about line search debug
 
@@ -50,6 +51,7 @@ class LineSearchDebugOptions:
         self.gp_verbose = gp_verbose
         self.plot_gp = plot_gp
         self.plot_threshold = plot_threshold
+        self.report_clipping = report_clipping
         # TODO: Options to disable acquisition, objective, gp, derivatives
 
 
@@ -269,6 +271,13 @@ def find_best_step(step_known, f_known, np):
 def return_best_step(step_known, f_known, np):
     return find_best_step(step_known, f_known, np), False
 
+def clip_step(step, x0, x1, debug_options, np):
+    # Clip step within 10% if cubic edges
+    if not (x0 + (x1 - x0) * .1 <= step <= x1 - (x1 - x0) * .1):
+        step = np.clip(step, x0 + (x1 - x0) * .1, x1 - (x1 - x0) * .1)
+        if debug_options.report_clipping:
+            print('step on boundary, clipped')
+    return step
 
 def gp_line_search(
     fg,
@@ -303,6 +312,7 @@ def gp_line_search(
     step_min = search_interval[0]
     step_max = search_interval[1]
     assert step_min < step_max, f"{step_min} >= {step_max}"
+    assert step_min in step_known and step_max in step_known
 
     # Vectors to hold the information we have already queried previously
     step_known, f_known, g_known = zip(
@@ -495,6 +505,10 @@ def gp_line_search(
                 f_known,
                 acquisitionFunction,
             )
+
+        known_step_to_left = max([s for s in step_known if s < step])
+        known_step_to_right = min([s for s in step_known if s > step])
+        step = clip_step(step, known_step_to_left, known_step_to_right, debug_options, np)
 
         k += 1
 
