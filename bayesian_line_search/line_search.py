@@ -623,6 +623,19 @@ def line_search(
 
     step_l, step_u = 0.0, 1.0
 
+    if line_search_function.strong_wolfe_condition_met(step_u):
+        if debug_options.report_wolfe_termination:
+            print(f"Wolfe after {k} iterations")
+        data_point = line_search_function.data_point(step_u)
+        return (
+            data_point.f,
+            data_point.g,
+            data_point.x,
+            step_u,
+            line_search_function.fun_eval,
+        )
+
+
     # Phase 1: We can not ensure the presence of a strong Wolfe step and only move interval to right and increase size
     while True:
         psi_step_l_f, psi_step_l_g = line_search_function.psi(step_l)
