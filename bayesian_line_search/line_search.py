@@ -506,8 +506,8 @@ def gp_line_search(
                 acquisitionFunction,
             )
 
-        known_step_to_left = max([s for s in step_known if s < step])
-        known_step_to_right = min([s for s in step_known if s > step])
+        known_step_to_left = step_min if step == step_min else max([s for s in step_known if s < step])
+        known_step_to_right = step_max if step == step_max else min([s for s in step_known if s > step])
         step = clip_step(step, known_step_to_left, known_step_to_right, debug_options, np)
 
         k += 1
