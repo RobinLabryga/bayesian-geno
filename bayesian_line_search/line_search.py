@@ -544,16 +544,16 @@ def find_interval_with_wolfe(
             return step_l, step_u
 
 
-def get_next_interval(objective, step_l, step_u, step_t, np):
+def get_next_interval(objective, step_l, step_u, step_t, can_guarantee_wolfe_step, np):
     f, g = objective(step_t)
     if not np.isfinite(f) or f > objective(step_l)[0]:
-        return step_l, step_t
+        return step_l, step_t, True
     else:
         # TODO: Make sure g is not 0.0
         if g * (step_l - step_t) > 0:
-            return step_t, step_u
+            return step_t, step_u, True
         else:
-            return step_t, step_l
+            return step_t, step_l, can_guarantee_wolfe_step
 
 
 def update_line_search_objective(
@@ -621,7 +621,7 @@ def line_search(
     k = 0
     step = None
 
-    step_l, step_u = 0.0, 1.0
+    step_l, step_u = 0.0, min(1.0, step_max)
 
     if line_search_function.strong_wolfe_condition_met(step_u):
         if debug_options.report_wolfe_termination:
@@ -635,12 +635,21 @@ def line_search(
             line_search_function.fun_eval,
         )
 
+    can_guarantee_wolfe_step = False
 
-    # Phase 1: We can not ensure the presence of a strong Wolfe step and only move interval to right and increase size
+    # Phase 1: Double the right interval endpoint, until larger than step_max or strong wolfe step garanteed
     while True:
         psi_step_l_f, psi_step_l_g = line_search_function.psi(step_l)
         psi_step_u_f, psi_step_u_g = line_search_function.psi(step_u)
         if psi_step_u_f >= psi_step_l_f or psi_step_u_g >= 0:
+            can_guarantee_wolfe_step = True
+            step_l, step_u = (
+                (step_l, step_u)
+                if not np.isfinite(psi_step_u_f) or psi_step_l_f <= psi_step_u_f
+                else (step_u, step_l)
+            )
+            break
+        if step_u >= step_max:
             step_l, step_u = (
                 (step_l, step_u)
                 if not np.isfinite(psi_step_u_f) or psi_step_l_f <= psi_step_u_f
@@ -674,16 +683,21 @@ def line_search(
 
         k += 1
 
-        step_u = 2. * step_u
+        step_u = max(2. * step_u, step_max)
 
         if debug_options.report_area_reduction:
             print(f"Interval size increased to={(step_l, step_u)}")
+    
+    assert step_l <= step_max and step_u <= step_max
 
-    # Phase 2: We can guarantee presence of strong Wolfe step and only decrease interval size
+    # Phase 2: We produce sub intervals in accordance to more thuente line search to inherit convergence guarantees, while determining trial step via Bayesian optimization
     line_search_objective = update_line_search_objective(
         line_search_function, step_u, line_search_function.psi
     )
 
+    previous_step = 0.0
+
+    interval_towards_step_max_factor = 1.1
     interval_size_decrease_factor = 2.0 / 3.0
     interval_size_prev_prev = np.inf
     interval_size_prev = np.inf
@@ -716,13 +730,14 @@ def line_search(
                     ],
                     None,
                 )
-            step_l, step_u = get_next_interval(
-                line_search_objective, step_l, step_u, step, np
+            step_l, step_u, can_guarantee_wolfe_step = get_next_interval(
+                line_search_objective, step_l, step_u, step, can_guarantee_wolfe_step, np
             )
             interval_size = abs(step_l - step_u)
             k += 1
         interval_size_prev_prev, interval_size_prev = interval_size_prev, interval_size
 
+        # Choose trial point
         step, wolfe_met = gp_line_search(
             line_search_function.phi,
             (min(step_l, step_u), max(step_l, step_u)),
@@ -736,6 +751,7 @@ def line_search(
         if debug_options.report_return_value:
             print(f"returned step={step} with f={line_search_function.fg(step)[0]}")
 
+        # Stop if any of the termination conditions are met
         if wolfe_met:
             if debug_options.report_wolfe_termination:
                 print(f"Wolfe after {k} iterations")
@@ -748,7 +764,6 @@ def line_search(
                 line_search_function.fun_eval,
             )
 
-        # Stop if any of the termination conditions are met
         if k > max_iter:
             if debug_options.report_wolfe_termination:
                 print("Terminated line search due to exceeded iteration count")
@@ -764,7 +779,7 @@ def line_search(
 
         step_data_point = line_search_function.data_point(step)
 
-        if step_data_point.f == -np.inf:
+        if step_data_point.f == -np.inf: # TODO: Wolfe conditions should cover this case
             if debug_options.report_wolfe_termination:
                 print("Terminated line search due to -inf")
             return (
@@ -803,12 +818,17 @@ def line_search(
                     np.argmax(stats.gaussian_kde(steps_in_interval)(steps_in_interval))
                 ]
 
+        # Ensure sufficient movement towards step_max if wolfe step can not be guaranteed
+        if not can_guarantee_wolfe_step:
+            step = np.clip(step, min(interval_towards_step_max_factor * previous_step, step_max), step_max)
+        previous_step = step
+
         line_search_objective = update_line_search_objective(
             line_search_function, step, line_search_objective
         )
 
-        step_l, step_u = get_next_interval(
-            line_search_objective, step_l, step_u, step, np
+        step_l, step_u, can_guarantee_wolfe_step = get_next_interval(
+            line_search_objective, step_l, step_u, step, can_guarantee_wolfe_step, np
         )
 
         if step_l == step_u:
