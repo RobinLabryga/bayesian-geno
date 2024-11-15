@@ -551,9 +551,9 @@ def get_next_interval(objective, step_l, step_u, step_t, can_guarantee_wolfe_ste
     else:
         # TODO: Make sure g is not 0.0
         if g * (step_l - step_t) > 0:
-            return step_t, step_u, True
+            return step_t, step_u, can_guarantee_wolfe_step
         else:
-            return step_t, step_l, can_guarantee_wolfe_step
+            return step_t, step_l, True
 
 
 def update_line_search_objective(
@@ -643,18 +643,8 @@ def line_search(
         psi_step_u_f, psi_step_u_g = line_search_function.psi(step_u)
         if psi_step_u_f >= psi_step_l_f or psi_step_u_g >= 0:
             can_guarantee_wolfe_step = True
-            step_l, step_u = (
-                (step_l, step_u)
-                if not np.isfinite(psi_step_u_f) or psi_step_l_f <= psi_step_u_f
-                else (step_u, step_l)
-            )
             break
         if step_u >= step_max:
-            step_l, step_u = (
-                (step_l, step_u)
-                if not np.isfinite(psi_step_u_f) or psi_step_l_f <= psi_step_u_f
-                else (step_u, step_l)
-            )
             break
 
         if line_search_function.strong_wolfe_condition_met(step_u):
@@ -831,7 +821,7 @@ def line_search(
             line_search_objective, step_l, step_u, step, can_guarantee_wolfe_step, np
         )
 
-        if step_l == step_u:
+        if abs(step_l - step_u) < 1e-10:
             if debug_options.report_wolfe_termination:
                 print("Terminated line search due to smallest interval reached")
             data_point = line_search_function.data_point(step)
