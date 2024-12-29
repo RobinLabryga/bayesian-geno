@@ -607,6 +607,9 @@ def line_search(
 
     # TODO: Make sure we only ever return a point that is actually the smallest we have seen, even if another one satisfies the strong Wolfe conditions.
 
+    assert f_old is not None
+    assert g_old is not None
+
     np = value_or_value(np, numpy)
     debug_options = value_or_func(debug_options, LineSearchDebugOptions)
 
@@ -673,6 +676,7 @@ def line_search(
 
         k += 1
 
+        step_l = step_u
         step_u = max(2. * step_u, step_max)
 
         if debug_options.report_area_reduction:
