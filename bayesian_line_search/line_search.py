@@ -125,6 +125,8 @@ class LineSearchFunctionWrapper:
         f0: float,
         g0: numpy.ndarray,
         d: numpy.ndarray,
+        step_min: float,
+        step_max: float,
         np: types.ModuleType = None,
         wolfe_c1: float = 1.0e-4,
         wolfe_c2: float = 0.9,
@@ -137,16 +139,22 @@ class LineSearchFunctionWrapper:
             f0 (float): The function value at x0
             g0 (numpy.ndarray): The gradient at x0
             d (numpy.ndarray): The search direction
+            step_min (float): The left bound of the interval
+            step_max (float): The right bound of the interval
             np (types.ModuleType, optional): The numpy module to use. numpy on None Defaults to None.
             wolfe_c1 (float, optional): The parameter for the sufficient decrease condition. Defaults to 1.0e-4.
             wolfe_c2 (float, optional): The parameter for the curvature condition. Defaults to 0.9.
         """
+        assert step_min <= 0.0 <= step_max
+
         self.np = value_or_value(np, numpy)
         self.__fg = fg
         self.x0 = x0
         self.f0 = f0
         self.dg0 = d.T @ g0
         self.d = d
+        self.step_min = step_min
+        self.step_max = step_max
         self.__wolfe_c1 = wolfe_c1
         self.__wolfe_c2 = wolfe_c2
         self.__data_points = {0.0: DataPoint(0.0, x0, f0, g0)}
@@ -166,8 +174,17 @@ class LineSearchFunctionWrapper:
         Returns:
             DataPoint: The data point at step
         """
+        assert self.step_min <= step <= self.step_max
         assert step in self.__data_points
         return self.__data_points[step]
+    
+    def update_step_bounds(self, step_min: float, step_max: float):
+        assert step_min <= step_max
+
+        self.step_min = step_min
+        self.step_max = step_max
+
+        self.data_points = {step: data_point for step, data_point in self.__data_points.items() if step_min <= step <= step_max}
 
     def x(self, step: float) -> numpy.ndarray:
         """x0 + step * d
@@ -191,6 +208,8 @@ class LineSearchFunctionWrapper:
         if debug:
             return self.__fg(self.x(step))
 
+        assert self.step_min <= step <= self.step_max
+
         if step not in self.__data_points:
             # TODO: Check if x already exists to avoid duplicate evaluation for case where step too small to change x numerically
             x = self.x(step)
@@ -210,6 +229,7 @@ class LineSearchFunctionWrapper:
         data_point = self.__data_points[step]
         return data_point.f, data_point.g
 
+    # TODO: Store phi and psi with datapoints to avoid duplicate evaluations and enable iteration over all datapoints
     def phi(self, step: float, debug: bool = False) -> tuple[float, float]:
         """
         Args:
@@ -317,19 +337,12 @@ def gp_line_search(
     S_debug = None
     f_debug = None
 
-    step_min = search_interval[0]
-    step_max = search_interval[1]
+    step_min, step_max = search_interval
     assert step_min < step_max, f"{step_min} >= {step_max}"
     assert step_min in step_known and step_max in step_known
 
     # Vectors to hold the information we have already queried previously
-    step_known, f_known, g_known = zip(
-        *[
-            (step, *fg(step))
-            for step in step_known
-            if step_min <= step and step <= step_max
-        ]
-    )
+    step_known, f_known, g_known = zip(*[(step, *fg(step)) for step in step_known])
     step_known = np.array(step_known)
     f_known = np.array(f_known)
     g_known = np.array(g_known)
@@ -610,12 +623,12 @@ def line_search(
             False
         ), f"Descent direction should be descent direction. Directional gradient was {dg} in direction {d}"
 
-    line_search_function = LineSearchFunctionWrapper(fg, x_old, f_old, g_old, d, np=np)
-
     k = 0
     step = None
 
     step_l, step_u = 0.0, min(1.0, max_step)
+
+    line_search_function = LineSearchFunctionWrapper(fg, x_old, f_old, g_old, d, step_l, step_u, np=np)
 
     if line_search_function.strong_wolfe_condition_met(step_u):
         if debug_options.report_wolfe_termination:
@@ -673,6 +686,8 @@ def line_search(
             print(f"Interval size increased to={(step_l, step_u)}")
     
     assert step_l <= max_step and step_u <= max_step
+
+    line_search_function.update_step_bounds(step_l, step_u)
 
     # Phase 2: We produce sub intervals in accordance to more thuente line search to inherit convergence guarantees, while determining trial step via Bayesian optimization
     line_search_objective = update_line_search_objective(
@@ -825,6 +840,8 @@ def line_search(
                 step,
                 line_search_function.fun_eval,
             )
+        
+        line_search_objective.update_step_bounds(min(step_l, step_u), max(step_l, step_u))
 
         if debug_options.report_area_reduction:
             print(
