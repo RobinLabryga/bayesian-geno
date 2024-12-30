@@ -151,6 +151,12 @@ class LineSearchFunctionWrapper:
         self.__data_points = {0.0: DataPoint(0.0, x0, f0, g0)}
         self.fun_eval = 0
 
+        self.step_best = 0.0
+        self.x_best = x0
+        self.f_best = f0
+        self.g_best = g0
+        self.dg_best = self.dg0
+
     def data_point(self, step: float) -> DataPoint:
         """
         Args:
@@ -190,6 +196,16 @@ class LineSearchFunctionWrapper:
             f, g = self.__fg(x)
             self.fun_eval += 1
             self.__data_points[step] = DataPoint(step, x, f, g)
+            if f < self.f_best or (
+                f == self.f_best
+                and step > self.step_best
+                and (self.x_best != x).any()  # Step too small to change x numerically
+            ):
+                self.f_best = f
+                self.g_best = g
+                self.x_best = x
+                self.dg_best = self.d.T @ g
+                self.step_best = step
         data_point = self.__data_points[step]
         return data_point.f, data_point.g
 
@@ -221,23 +237,6 @@ class LineSearchFunctionWrapper:
 
     def known_steps(self):
         return self.__data_points.keys()
-
-    def find_best_data_point(self):
-        best = None
-        for step, data_point in self.__data_points.items():
-            if (
-                best is None
-                or data_point.f < best.f
-                or (data_point.f <= best.f and data_point.step > best.step)
-            ):
-                best = data_point
-
-        data_point_old = self.__data_points[0.0]
-
-        if (data_point_old.x == best.x).all():  # step too small to change x
-            return data_point_old
-
-        return best
 
     def sufficient_decrease_met(self, step):
         f, g = self.fg(step)
@@ -673,12 +672,11 @@ def line_search(
         if k > max_iter:
             if debug_options.report_wolfe_termination:
                 print("Terminated line search due to exceeded iteration count")
-            best_data_point = line_search_function.find_best_data_point()
             return (
-                best_data_point.f,
-                best_data_point.g,
-                best_data_point.x,
-                best_data_point.step if best_data_point.step != 0.0 else None,
+                line_search_function.f_best,
+                line_search_function.g_best,
+                line_search_function.x_best,
+                line_search_function.step_best if line_search_function.step_best != 0.0 else None,
                 line_search_function.fun_eval,
             )
 
@@ -769,12 +767,11 @@ def line_search(
         if k > max_iter:
             if debug_options.report_wolfe_termination:
                 print("Terminated line search due to exceeded iteration count")
-            best_data_point = line_search_function.find_best_data_point()
             return (
-                best_data_point.f,
-                best_data_point.g,
-                best_data_point.x,
-                best_data_point.step if best_data_point.step != 0.0 else None,
+                line_search_function.f_best,
+                line_search_function.g_best,
+                line_search_function.x_best,
+                line_search_function.step_best if line_search_function.step_best != 0.0 else None,
                 line_search_function.fun_eval,
             )
         k += 1
