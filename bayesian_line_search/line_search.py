@@ -7,6 +7,7 @@ from scipy import stats
 from acquisition import AcquisitionFunction, LowerConfidenceBound
 from acquisition.optimization import DIRECT_LBFGSB_AcquisitionOptimizer
 from gaussian_process.prior_mean import ConstantMean
+from dataclasses import dataclass
 
 from util import value_or_value, value_or_func
 
@@ -102,12 +103,12 @@ def print_debug_info(
     plt.show()
 
 
+@dataclass
 class DataPoint:
-    def __init__(self, step, x, f, g) -> types.NoneType:
-        self.step = step
-        self.x = x
-        self.f = f
-        self.g = g
+    step: float
+    x: numpy.ndarray
+    f: float
+    g: numpy.ndarray
 
     def __str__(self) -> str:
         return f"s={self.step}, f={self.f}"
