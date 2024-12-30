@@ -684,7 +684,7 @@ def line_search(
 
         if debug_options.report_area_reduction:
             print(f"Interval size increased to={(step_l, step_u)}")
-    
+
     assert step_l <= max_step and step_u <= max_step
 
     line_search_function.update_step_bounds(step_l, step_u)
@@ -693,6 +693,14 @@ def line_search(
     line_search_objective = update_line_search_objective(
         line_search_function, step_u, line_search_function.psi
     )
+
+    # Prepopulate with steps up to sufficient decrease condition
+    step = step_u
+    while True:
+        if line_search_function.sufficient_decrease_met(step):
+            break
+        step = (step_l + 9.0 * step) / 10.0
+        k += 1
 
     previous_step = 0.0
 
@@ -840,7 +848,7 @@ def line_search(
                 step,
                 line_search_function.fun_eval,
             )
-        
+
         line_search_objective.update_step_bounds(min(step_l, step_u), max(step_l, step_u))
 
         if debug_options.report_area_reduction:
