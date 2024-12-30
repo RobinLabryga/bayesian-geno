@@ -184,7 +184,7 @@ class LineSearchFunctionWrapper:
         self.step_min = step_min
         self.step_max = step_max
 
-        self.data_points = {step: data_point for step, data_point in self.__data_points.items() if step_min <= step <= step_max}
+        self.__data_points = {step: data_point for step, data_point in self.__data_points.items() if step_min <= step <= step_max}
 
     def x(self, step: float) -> numpy.ndarray:
         """x0 + step * d
@@ -208,7 +208,7 @@ class LineSearchFunctionWrapper:
         if debug:
             return self.__fg(self.x(step))
 
-        assert self.step_min <= step <= self.step_max
+        assert self.step_min <= step <= self.step_max, f"{self.step_min}, {step}, {self.step_max}"
 
         if step not in self.__data_points:
             # TODO: Check if x already exists to avoid duplicate evaluation for case where step too small to change x numerically
@@ -628,7 +628,7 @@ def line_search(
 
     step_l, step_u = 0.0, min(1.0, max_step)
 
-    line_search_function = LineSearchFunctionWrapper(fg, x_old, f_old, g_old, d, step_l, step_u, np=np)
+    line_search_function = LineSearchFunctionWrapper(fg, x_old, f_old, g_old, d, step_l, max_step, np=np)
 
     if line_search_function.strong_wolfe_condition_met(step_u):
         if debug_options.report_wolfe_termination:
@@ -849,7 +849,7 @@ def line_search(
                 line_search_function.fun_eval,
             )
 
-        line_search_objective.update_step_bounds(min(step_l, step_u), max(step_l, step_u))
+        line_search_function.update_step_bounds(min(step_l, step_u), max(step_l, step_u))
 
         if debug_options.report_area_reduction:
             print(
