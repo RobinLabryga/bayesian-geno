@@ -535,23 +535,6 @@ def gp_line_search(
     return return_best_step(step_known, f_known, np)
 
 
-def find_interval_with_wolfe(
-    line_search_function, step_l, step_u, debug_options
-):  # TODO: Remove
-    """Moves interval to ensure point that satisfies strong Wolfe condition is inside"""
-    psi_f_l, psi_g_l = line_search_function.psi(step_l)
-    while True:
-        psi_f_u, psi_g_u = line_search_function.psi(step_u)
-
-        # TODO: Consider if a check for phi_g_u >= makes sense
-        if psi_f_u < psi_f_l and psi_g_u < 0:
-            step_u = 2 * step_u
-            if debug_options.report_area_reduction:
-                print(f"Moved interval to ({step_l}, {step_u})")
-        else:
-            return step_l, step_u
-
-
 def get_next_interval(objective, step_l, step_u, step_t, can_guarantee_wolfe_step, np):
     f, g = objective(step_t)
     if not np.isfinite(f) or f > objective(step_l)[0]:
