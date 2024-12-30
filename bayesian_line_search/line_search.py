@@ -239,23 +239,31 @@ class LineSearchFunctionWrapper:
 
         return best
 
-    def wolfe_one_met(self, step):
+    def sufficient_decrease_met(self, step):
         f, g = self.fg(step)
         return f <= self.f0 + self.__wolfe_c1 * step * self.dg0
 
-    def wolfe_two_met(self, step):
+    def curvature_met(self, step):
         f, g = self.fg(step)
         return -self.d.T @ g <= -self.__wolfe_c2 * self.dg0
 
-    def wolfe_three_met(self, step):
+    def modified_curvature_met(self, step):
         f, g = self.fg(step)
         return self.np.abs(self.d.T @ g) <= self.__wolfe_c2 * self.np.abs(self.dg0)
 
     def wolfe_condition_met(self, step):
-        return self.wolfe_one_met(step) and self.wolfe_two_met(step)
+        f, g = self.fg(step)
+        return (f <= self.f0 + self.__wolfe_c1 * step * self.dg0) and (
+            -self.d.T @ g <= -self.__wolfe_c2 * self.dg0
+        )
+        # return self.sufficient_decrease_met(step) and self.curvature_met(step)
 
     def strong_wolfe_condition_met(self, step):
-        return self.wolfe_one_met(step) and self.wolfe_three_met(step)
+        f, g = self.fg(step)
+        return (f <= self.f0 + self.__wolfe_c1 * step * self.dg0) and (
+            self.np.abs(self.d.T @ g) <= self.__wolfe_c2 * self.np.abs(self.dg0)
+        )
+        # return self.sufficient_decrease_met(step) and self.modified_curvature_met(step)
 
 
 def find_best_step(step_known, f_known, np):
