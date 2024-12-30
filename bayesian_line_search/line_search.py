@@ -581,7 +581,7 @@ def line_search(
     x_old,
     d,
     fg,
-    step_max,
+    max_step,
     f_old,
     g_old,
     quadratic: bool = False,
@@ -596,7 +596,7 @@ def line_search(
         x_old (_type_): The current x value
         d (_type_): The direction to search towards
         fg (_type_): _comment_
-        step_max (_type_): The maximum step size that is allowed. step will be in [0.0, min(1.0, step_max)]
+        max_step (_type_): The maximum step size that is allowed. step will be in [0.0, min(1.0, max_step)]
         f_old (_type_): The function value at x_old
         g_old (_type_): The gradient at x_old
         quadratic (_type_, optional): True, if the function is quadratic in direction d. Defaults to False.
@@ -632,7 +632,7 @@ def line_search(
     k = 0
     step = None
 
-    step_l, step_u = 0.0, min(1.0, step_max)
+    step_l, step_u = 0.0, min(1.0, max_step)
 
     if line_search_function.strong_wolfe_condition_met(step_u):
         if debug_options.report_wolfe_termination:
@@ -655,7 +655,7 @@ def line_search(
         if psi_step_u_f >= psi_step_l_f or psi_step_u_g >= 0:
             can_guarantee_wolfe_step = True
             break
-        if step_u >= step_max:
+        if step_u >= max_step:
             break
 
         if line_search_function.strong_wolfe_condition_met(step_u):
@@ -684,12 +684,12 @@ def line_search(
         k += 1
 
         step_l = step_u
-        step_u = max(2. * step_u, step_max)
+        step_u = max(2. * step_u, max_step)
 
         if debug_options.report_area_reduction:
             print(f"Interval size increased to={(step_l, step_u)}")
     
-    assert step_l <= step_max and step_u <= step_max
+    assert step_l <= max_step and step_u <= max_step
 
     # Phase 2: We produce sub intervals in accordance to more thuente line search to inherit convergence guarantees, while determining trial step via Bayesian optimization
     line_search_objective = update_line_search_objective(
@@ -820,7 +820,7 @@ def line_search(
 
         # Ensure sufficient movement towards step_max if wolfe step can not be guaranteed
         if not can_guarantee_wolfe_step:
-            step = np.clip(step, min(interval_towards_step_max_factor * previous_step, step_max), step_max)
+            step = np.clip(step, min(interval_towards_step_max_factor * previous_step, max_step), max_step)
         previous_step = step
 
         line_search_objective = update_line_search_objective(
