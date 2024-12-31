@@ -680,7 +680,7 @@ def line_search(
         k += 1
 
         step_l = step_u
-        step_u = max(2. * step_u, max_step)
+        step_u = min(2. * step_u, max_step)
 
         if debug_options.report_area_reduction:
             print(f"Interval size increased to={(step_l, step_u)}")
