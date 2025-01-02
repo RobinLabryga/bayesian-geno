@@ -8,6 +8,7 @@ from acquisition import AcquisitionFunction, LowerConfidenceBound
 from acquisition.optimization import DIRECT_LBFGSB_AcquisitionOptimizer
 from gaussian_process.prior_mean import ConstantMean
 from dataclasses import dataclass
+import warnings
 
 from util import value_or_value, value_or_func
 
@@ -179,7 +180,11 @@ class LineSearchFunctionWrapper:
         return self.__data_points[step]
     
     def update_step_bounds(self, step_min: float, step_max: float):
-        assert step_min <= step_max
+        assert step_min <= step_max, f"{step_min} > {step_max}"
+
+        if not (step_min <= self.step_best <= step_max):
+            if not ((self.x_best == self.x(step_min)).all() or (self.x_best == self.x(step_max)).all()):
+                warnings.warn(f"Best step {self.step_best} outside interval {step_min} to {step_max}")
 
         self.step_min = step_min
         self.step_max = step_max
@@ -609,8 +614,6 @@ def line_search(
         fun_eval (_type_): The number of function evaluations done during the line search
     """
 
-    # TODO: Make sure we only ever return a point that is actually the smallest we have seen, even if another one satisfies the strong Wolfe conditions.
-
     assert f_old is not None
     assert g_old is not None
 
@@ -634,6 +637,7 @@ def line_search(
         if debug_options.report_wolfe_termination:
             print(f"Wolfe after {k} iterations")
         data_point = line_search_function.data_point(step_u)
+        assert data_point.f <= line_search_function.f_best
         return (
             data_point.f,
             data_point.g,
@@ -658,6 +662,7 @@ def line_search(
             if debug_options.report_wolfe_termination:
                 print(f"Wolfe after {k} iterations")
             data_point = line_search_function.data_point(step_u)
+            assert data_point.f <= line_search_function.f_best
             return (
                 data_point.f,
                 data_point.g,
@@ -680,7 +685,7 @@ def line_search(
         k += 1
 
         step_l = step_u
-        step_u = min(2. * step_u, max_step)
+        step_u = min(4. * step_u, max_step)
 
         if debug_options.report_area_reduction:
             print(f"Interval size increased to={(step_l, step_u)}")
@@ -689,18 +694,52 @@ def line_search(
 
     line_search_function.update_step_bounds(step_l, step_u)
 
+    # Prepopulate with steps up to sufficient decrease condition
+    step = step_u
+    while True:
+        if line_search_function.sufficient_decrease_met(step):
+            if (line_search_function.x(step) == line_search_function.x0).all():
+                if debug_options.report_wolfe_termination:
+                    print("Terminated line search due to step being identical to x0")
+                return (
+                    line_search_function.f_best,
+                    line_search_function.g_best,
+                    line_search_function.x_best,
+                    line_search_function.step_best if line_search_function.step_best != 0.0 else None,
+                    line_search_function.fun_eval,
+                )
+            break
+        if k > max_iter:
+            if debug_options.report_wolfe_termination:
+                print("Terminated line search due to exceeded iteration count")
+            return (
+                line_search_function.f_best,
+                line_search_function.g_best,
+                line_search_function.x_best,
+                line_search_function.step_best if line_search_function.step_best != 0.0 else None,
+                line_search_function.fun_eval,
+            )
+        step = (9. * step_l + 1. * step) / 10.0
+        k += 1
+
     # Phase 2: We produce sub intervals in accordance to more thuente line search to inherit convergence guarantees, while determining trial step via Bayesian optimization
     line_search_objective = update_line_search_objective(
         line_search_function, step_u, line_search_function.psi
     )
 
-    # Prepopulate with steps up to sufficient decrease condition
-    step = step_u
-    while True:
-        if line_search_function.sufficient_decrease_met(step):
-            break
-        step = (step_l + 9.0 * step) / 10.0
-        k += 1
+    # Only start byesian phase if step does not satisfy strong Wolfe conditions
+    if line_search_function.strong_wolfe_condition_met(step):
+        if debug_options.report_wolfe_termination:
+            print(f"Wolfe met pre Bayesian")
+        data_point = line_search_function.data_point(step)
+        assert data_point.f <= line_search_function.f_best
+        return (
+            data_point.f,
+            data_point.g,
+            data_point.x,
+            step,
+            line_search_function.fun_eval,
+        )
 
     previous_step = 0.0
 
@@ -763,6 +802,7 @@ def line_search(
             if debug_options.report_wolfe_termination:
                 print(f"Wolfe after {k} iterations")
             data_point = line_search_function.data_point(step)
+            assert data_point.f <= line_search_function.f_best
             return (
                 data_point.f,
                 data_point.g,
@@ -785,7 +825,7 @@ def line_search(
 
         step_data_point = line_search_function.data_point(step)
 
-        if step_data_point.f == -np.inf: # TODO: Wolfe conditions should cover this case
+        if step_data_point.f == -np.inf:
             if debug_options.report_wolfe_termination:
                 print("Terminated line search due to -inf")
             return (
@@ -840,18 +880,17 @@ def line_search(
         if abs(step_l - step_u) < 1e-10:
             if debug_options.report_wolfe_termination:
                 print("Terminated line search due to smallest interval reached")
-            data_point = line_search_function.data_point(step)
             return (
-                data_point.f,
-                data_point.g,
-                data_point.x,
-                step,
+                line_search_function.f_best,
+                line_search_function.g_best,
+                line_search_function.x_best,
+                line_search_function.step_best if line_search_function.step_best != 0.0 else None,
                 line_search_function.fun_eval,
             )
-
-        line_search_function.update_step_bounds(min(step_l, step_u), max(step_l, step_u))
 
         if debug_options.report_area_reduction:
             print(
                 f"Could not find step. Restarting with search_interval={(step_l, step_u)}"
             )
+
+        line_search_function.update_step_bounds(min(step_l, step_u), max(step_l, step_u))
