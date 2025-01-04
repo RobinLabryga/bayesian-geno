@@ -182,7 +182,7 @@ class LineSearchFunctionWrapper:
     def update_step_bounds(self, step_min: float, step_max: float):
         assert step_min <= step_max, f"{step_min} > {step_max}"
 
-        if not (step_min <= self.step_best <= step_max):
+        if not (step_min <= self.step_best <= step_max) and self.fg(step_min)[0] > self.f_best and self.fg(step_max)[0] > self.f_best:
             if not ((self.x_best == self.x(step_min)).all() or (self.x_best == self.x(step_max)).all()):
                 warnings.warn(f"Best step {self.step_best} outside interval {step_min} to {step_max}")
 
@@ -558,7 +558,8 @@ def get_next_interval(objective, step_l, step_u, step_t, can_guarantee_wolfe_ste
     if not np.isfinite(f) or f > objective(step_l)[0]:
         return step_l, step_t, True
     else:
-        # TODO: Make sure g is not 0.0
+        assert g != 0.0
+
         if g * (step_l - step_t) > 0:
             return step_t, step_u, can_guarantee_wolfe_step
         else:
