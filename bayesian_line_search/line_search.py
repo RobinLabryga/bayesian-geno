@@ -178,13 +178,13 @@ class LineSearchFunctionWrapper:
         assert self.step_min <= step <= self.step_max
         assert step in self.__data_points
         return self.__data_points[step]
-    
+
     def update_step_bounds(self, step_min: float, step_max: float):
         assert step_min <= step_max, f"{step_min} > {step_max}"
 
         if not (step_min <= self.step_best <= step_max) and self.fg(step_min)[0] > self.f_best and self.fg(step_max)[0] > self.f_best:
             if not ((self.x_best == self.x(step_min)).all() or (self.x_best == self.x(step_max)).all()):
-                warnings.warn(f"Best step {self.step_best} outside interval {step_min} to {step_max}")
+                warnings.warn(f"Best step {self.step_best} (f={self.f_best}) outside interval {step_min} (f={self.fg(step_min)[0]}) to {step_max} (f={self.fg(step_max)[0]})")
 
         self.step_min = step_min
         self.step_max = step_max
@@ -221,11 +221,16 @@ class LineSearchFunctionWrapper:
             f, g = self.__fg(x)
             self.fun_eval += 1
             self.__data_points[step] = DataPoint(step, x, f, g)
-            if f < self.f_best or (
-                f == self.f_best
-                and step > self.step_best
-                and (self.x_best != x).any()  # Step too small to change x numerically
-            ):
+            if (
+                f < self.f_best
+                or (
+                    f == self.f_best
+                    and step > self.step_best
+                    and (
+                        self.x_best != x
+                    ).any()  # Step too small to change x numerically
+                )
+            ) and self.np.isfinite(g).all():
                 self.f_best = f
                 self.g_best = g
                 self.x_best = x
@@ -653,6 +658,8 @@ def line_search(
     while True:
         psi_step_l_f, psi_step_l_g = line_search_function.psi(step_l)
         psi_step_u_f, psi_step_u_g = line_search_function.psi(step_u)
+        if np.isnan(psi_step_u_f) or np.isnan(psi_step_u_g):
+            break
         if psi_step_u_f >= psi_step_l_f or psi_step_u_g >= 0:
             can_guarantee_wolfe_step = True
             break
