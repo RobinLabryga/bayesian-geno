@@ -643,7 +643,7 @@ def line_search(
         if debug_options.report_wolfe_termination:
             print(f"Wolfe after {k} iterations")
         data_point = line_search_function.data_point(step_u)
-        assert data_point.f <= line_search_function.f_best
+        assert data_point.f <= line_search_function.f_best, f"Trying to return step with strong Wolfe that is not best. step={step_u}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
         return (
             data_point.f,
             data_point.g,
@@ -670,7 +670,7 @@ def line_search(
             if debug_options.report_wolfe_termination:
                 print(f"Wolfe after {k} iterations")
             data_point = line_search_function.data_point(step_u)
-            assert data_point.f <= line_search_function.f_best
+            assert data_point.f <= line_search_function.f_best, f"Trying to return step with strong Wolfe that is not best. step={step_u}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
             return (
                 data_point.f,
                 data_point.g,
@@ -736,11 +736,14 @@ def line_search(
     )
 
     # Only start byesian phase if step does not satisfy strong Wolfe conditions
-    if line_search_function.strong_wolfe_condition_met(step):
+    if (
+        line_search_function.strong_wolfe_condition_met(step)
+        and line_search_function.fg(step)[0] <= line_search_function.f_best # Sometimes the right hand side satisfies the strong Wolfe condition, but the left hand side does not, despite better function value.
+    ):
         if debug_options.report_wolfe_termination:
             print(f"Wolfe met pre Bayesian")
         data_point = line_search_function.data_point(step)
-        assert data_point.f <= line_search_function.f_best
+        assert data_point.f <= line_search_function.f_best, f"Trying to return step with strong Wolfe that is not best. step={step}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
         return (
             data_point.f,
             data_point.g,
@@ -810,7 +813,7 @@ def line_search(
             if debug_options.report_wolfe_termination:
                 print(f"Wolfe after {k} iterations")
             data_point = line_search_function.data_point(step)
-            assert data_point.f <= line_search_function.f_best
+            assert data_point.f <= line_search_function.f_best, f"Trying to return step with strong Wolfe that is not best. step={step}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
             return (
                 data_point.f,
                 data_point.g,
