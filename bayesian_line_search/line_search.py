@@ -182,14 +182,27 @@ class LineSearchFunctionWrapper:
     def update_step_bounds(self, step_min: float, step_max: float):
         assert step_min <= step_max, f"{step_min} > {step_max}"
 
-        if not (step_min <= self.step_best <= step_max) and self.fg(step_min)[0] > self.f_best and self.fg(step_max)[0] > self.f_best:
-            if not ((self.x_best == self.x(step_min)).all() or (self.x_best == self.x(step_max)).all()):
-                warnings.warn(f"Best step {self.step_best} (f={self.f_best}) outside interval {step_min} (f={self.fg(step_min)[0]}) to {step_max} (f={self.fg(step_max)[0]})")
+        if (
+            not (step_min <= self.step_best <= step_max)
+            and self.fg(step_min)[0] > self.f_best
+            and self.fg(step_max)[0] > self.f_best
+        ):
+            if not (
+                (self.x_best == self.x(step_min)).all()
+                or (self.x_best == self.x(step_max)).all()
+            ):
+                warnings.warn(
+                    f"Best step {self.step_best} (f={self.f_best}) outside interval {step_min} (f={self.fg(step_min)[0]}) to {step_max} (f={self.fg(step_max)[0]})"
+                )
 
         self.step_min = step_min
         self.step_max = step_max
 
-        self.__data_points = {step: data_point for step, data_point in self.__data_points.items() if step_min <= step <= step_max}
+        self.__data_points = {
+            step: data_point
+            for step, data_point in self.__data_points.items()
+            if step_min <= step <= step_max
+        }
 
     def x(self, step: float) -> numpy.ndarray:
         """x0 + step * d
@@ -213,7 +226,9 @@ class LineSearchFunctionWrapper:
         if debug:
             return self.__fg(self.x(step))
 
-        assert self.step_min <= step <= self.step_max, f"{self.step_min}, {step}, {self.step_max}"
+        assert (
+            self.step_min <= step <= self.step_max
+        ), f"{self.step_min}, {step}, {self.step_max}"
 
         if step not in self.__data_points:
             # TODO: Check if x already exists to avoid duplicate evaluation for case where step too small to change x numerically
@@ -309,13 +324,15 @@ def find_best_step(step_known, f_known, np):
 def return_best_step(step_known, f_known, np):
     return find_best_step(step_known, f_known, np), False
 
+
 def clip_step(step, x0, x1, debug_options, np):
     # Clip step within 10% if cubic edges
-    if not (x0 + (x1 - x0) * .1 <= step <= x1 - (x1 - x0) * .1):
-        step = np.clip(step, x0 + (x1 - x0) * .1, x1 - (x1 - x0) * .1)
+    if not (x0 + (x1 - x0) * 0.1 <= step <= x1 - (x1 - x0) * 0.1):
+        step = np.clip(step, x0 + (x1 - x0) * 0.1, x1 - (x1 - x0) * 0.1)
         if debug_options.report_clipping:
-            print('step on boundary, clipped')
+            print("step on boundary, clipped")
     return step
+
 
 def gp_line_search(
     fg,
@@ -537,9 +554,15 @@ def gp_line_search(
                 acquisitionFunction,
             )
 
-        known_step_to_left = step_min if step == step_min else max([s for s in step_known if s < step])
-        known_step_to_right = step_max if step == step_max else min([s for s in step_known if s > step])
-        step = clip_step(step, known_step_to_left, known_step_to_right, debug_options, np)
+        known_step_to_left = (
+            step_min if step == step_min else max([s for s in step_known if s < step])
+        )
+        known_step_to_right = (
+            step_max if step == step_max else min([s for s in step_known if s > step])
+        )
+        step = clip_step(
+            step, known_step_to_left, known_step_to_right, debug_options, np
+        )
 
         k += 1
 
@@ -637,13 +660,17 @@ def line_search(
 
     step_l, step_u = 0.0, min(1.0, max_step)
 
-    line_search_function = LineSearchFunctionWrapper(fg, x_old, f_old, g_old, d, step_l, max_step, np=np)
+    line_search_function = LineSearchFunctionWrapper(
+        fg, x_old, f_old, g_old, d, step_l, max_step, np=np
+    )
 
     if line_search_function.strong_wolfe_condition_met(step_u):
         if debug_options.report_wolfe_termination:
             print(f"Wolfe after {k} iterations")
         data_point = line_search_function.data_point(step_u)
-        assert data_point.f <= line_search_function.f_best, f"Trying to return step with strong Wolfe that is not best. step={step_u}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
+        assert (
+            data_point.f <= line_search_function.f_best
+        ), f"Trying to return step with strong Wolfe that is not best. step={step_u}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
         return (
             data_point.f,
             data_point.g,
@@ -670,7 +697,9 @@ def line_search(
             if debug_options.report_wolfe_termination:
                 print(f"Wolfe after {k} iterations")
             data_point = line_search_function.data_point(step_u)
-            assert data_point.f <= line_search_function.f_best, f"Trying to return step with strong Wolfe that is not best. step={step_u}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
+            assert (
+                data_point.f <= line_search_function.f_best
+            ), f"Trying to return step with strong Wolfe that is not best. step={step_u}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
             return (
                 data_point.f,
                 data_point.g,
@@ -686,14 +715,18 @@ def line_search(
                 line_search_function.f_best,
                 line_search_function.g_best,
                 line_search_function.x_best,
-                line_search_function.step_best if line_search_function.step_best != 0.0 else None,
+                (
+                    line_search_function.step_best
+                    if line_search_function.step_best != 0.0
+                    else None
+                ),
                 line_search_function.fun_eval,
             )
 
         k += 1
 
         step_l = step_u
-        step_u = min(4. * step_u, max_step)
+        step_u = min(4.0 * step_u, max_step)
 
         if debug_options.report_area_reduction:
             print(f"Interval size increased to={(step_l, step_u)}")
@@ -713,7 +746,11 @@ def line_search(
                     line_search_function.f_best,
                     line_search_function.g_best,
                     line_search_function.x_best,
-                    line_search_function.step_best if line_search_function.step_best != 0.0 else None,
+                    (
+                        line_search_function.step_best
+                        if line_search_function.step_best != 0.0
+                        else None
+                    ),
                     line_search_function.fun_eval,
                 )
             break
@@ -724,10 +761,14 @@ def line_search(
                 line_search_function.f_best,
                 line_search_function.g_best,
                 line_search_function.x_best,
-                line_search_function.step_best if line_search_function.step_best != 0.0 else None,
+                (
+                    line_search_function.step_best
+                    if line_search_function.step_best != 0.0
+                    else None
+                ),
                 line_search_function.fun_eval,
             )
-        step = (9. * step_l + 1. * step) / 10.0
+        step = (9.0 * step_l + 1.0 * step) / 10.0
         k += 1
 
     # Phase 2: We produce sub intervals in accordance to more thuente line search to inherit convergence guarantees, while determining trial step via Bayesian optimization
@@ -738,12 +779,15 @@ def line_search(
     # Only start byesian phase if step does not satisfy strong Wolfe conditions
     if (
         line_search_function.strong_wolfe_condition_met(step)
-        and line_search_function.fg(step)[0] <= line_search_function.f_best # Sometimes the right hand side satisfies the strong Wolfe condition, but the left hand side does not, despite better function value.
+        and line_search_function.fg(step)[0]
+        <= line_search_function.f_best  # Sometimes the right hand side satisfies the strong Wolfe condition, but the left hand side does not, despite better function value.
     ):
         if debug_options.report_wolfe_termination:
             print(f"Wolfe met pre Bayesian")
         data_point = line_search_function.data_point(step)
-        assert data_point.f <= line_search_function.f_best, f"Trying to return step with strong Wolfe that is not best. step={step}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
+        assert (
+            data_point.f <= line_search_function.f_best
+        ), f"Trying to return step with strong Wolfe that is not best. step={step}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
         return (
             data_point.f,
             data_point.g,
@@ -788,7 +832,12 @@ def line_search(
                     None,
                 )
             step_l, step_u, can_guarantee_wolfe_step = get_next_interval(
-                line_search_objective, step_l, step_u, step, can_guarantee_wolfe_step, np
+                line_search_objective,
+                step_l,
+                step_u,
+                step,
+                can_guarantee_wolfe_step,
+                np,
             )
             interval_size = abs(step_l - step_u)
             k += 1
@@ -813,7 +862,9 @@ def line_search(
             if debug_options.report_wolfe_termination:
                 print(f"Wolfe after {k} iterations")
             data_point = line_search_function.data_point(step)
-            assert data_point.f <= line_search_function.f_best, f"Trying to return step with strong Wolfe that is not best. step={step}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
+            assert (
+                data_point.f <= line_search_function.f_best
+            ), f"Trying to return step with strong Wolfe that is not best. step={step}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
             return (
                 data_point.f,
                 data_point.g,
@@ -829,7 +880,11 @@ def line_search(
                 line_search_function.f_best,
                 line_search_function.g_best,
                 line_search_function.x_best,
-                line_search_function.step_best if line_search_function.step_best != 0.0 else None,
+                (
+                    line_search_function.step_best
+                    if line_search_function.step_best != 0.0
+                    else None
+                ),
                 line_search_function.fun_eval,
             )
         k += 1
@@ -877,7 +932,11 @@ def line_search(
 
         # Ensure sufficient movement towards step_max if wolfe step can not be guaranteed
         if not can_guarantee_wolfe_step:
-            step = np.clip(step, min(interval_towards_step_max_factor * previous_step, max_step), max_step)
+            step = np.clip(
+                step,
+                min(interval_towards_step_max_factor * previous_step, max_step),
+                max_step,
+            )
         previous_step = step
 
         line_search_objective = update_line_search_objective(
@@ -895,7 +954,11 @@ def line_search(
                 line_search_function.f_best,
                 line_search_function.g_best,
                 line_search_function.x_best,
-                line_search_function.step_best if line_search_function.step_best != 0.0 else None,
+                (
+                    line_search_function.step_best
+                    if line_search_function.step_best != 0.0
+                    else None
+                ),
                 line_search_function.fun_eval,
             )
 
@@ -904,4 +967,6 @@ def line_search(
                 f"Could not find step. Restarting with search_interval={(step_l, step_u)}"
             )
 
-        line_search_function.update_step_bounds(min(step_l, step_u), max(step_l, step_u))
+        line_search_function.update_step_bounds(
+            min(step_l, step_u), max(step_l, step_u)
+        )
