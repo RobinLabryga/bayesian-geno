@@ -689,6 +689,11 @@ def line_search(
             break
         if psi_step_u_f >= psi_step_l_f or psi_step_u_g >= 0:
             can_guarantee_wolfe_step = True
+            # Reorder step_l and step_u such that step_l has better function value and points towards step_u
+            if psi_step_u_f >= psi_step_l_f:
+                step_l, step_u = step_l, step_u
+            else:
+                step_l, step_u = step_u, step_l
             break
         if step_u >= max_step:
             break
@@ -733,15 +738,16 @@ def line_search(
 
     assert step_l <= max_step and step_u <= max_step
 
-    line_search_function.update_step_bounds(step_l, step_u)
+    line_search_function.update_step_bounds(min(step_l, step_u), max(step_l, step_u))
 
     # Prepopulate with steps up to sufficient decrease condition
+    # We know that step_l satisfies the sufficient decrease condition.
     step = step_u
     while True:
         if line_search_function.sufficient_decrease_met(step):
             if (line_search_function.x(step) == line_search_function.x0).all():
                 if debug_options.report_wolfe_termination:
-                    print("Terminated line search due to step being identical to x0")
+                    print("Terminated line search due to step of prepopulation being identical to x0")
                 return (
                     line_search_function.f_best,
                     line_search_function.g_best,
@@ -771,30 +777,26 @@ def line_search(
         step = (9.0 * step_l + 1.0 * step) / 10.0
         k += 1
 
+    # Only start byesian phase if step does not satisfy strong Wolfe conditions
+    if (line_search_function.strong_wolfe_condition_met(step)):
+        data_point = line_search_function.data_point(step)
+
+        # Sometimes the right hand side satisfies the strong Wolfe condition, but the left hand side does not, despite better function value. We continue in that case
+        if data_point.f <= line_search_function.f_best:
+            if debug_options.report_wolfe_termination:
+                print(f"Wolfe met pre Bayesian")
+            return (
+                data_point.f,
+                data_point.g,
+                data_point.x,
+                step,
+                line_search_function.fun_eval,
+            )
+
     # Phase 2: We produce sub intervals in accordance to more thuente line search to inherit convergence guarantees, while determining trial step via Bayesian optimization
     line_search_objective = update_line_search_objective(
         line_search_function, step_u, line_search_function.psi
     )
-
-    # Only start byesian phase if step does not satisfy strong Wolfe conditions
-    if (
-        line_search_function.strong_wolfe_condition_met(step)
-        and line_search_function.fg(step)[0]
-        <= line_search_function.f_best  # Sometimes the right hand side satisfies the strong Wolfe condition, but the left hand side does not, despite better function value.
-    ):
-        if debug_options.report_wolfe_termination:
-            print(f"Wolfe met pre Bayesian")
-        data_point = line_search_function.data_point(step)
-        assert (
-            data_point.f <= line_search_function.f_best
-        ), f"Trying to return step with strong Wolfe that is not best. step={step}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
-        return (
-            data_point.f,
-            data_point.g,
-            data_point.x,
-            step,
-            line_search_function.fun_eval,
-        )
 
     previous_step = 0.0
 
