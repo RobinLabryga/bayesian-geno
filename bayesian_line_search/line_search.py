@@ -690,10 +690,11 @@ def line_search(
         if psi_step_u_f >= psi_step_l_f or psi_step_u_g >= 0:
             can_guarantee_wolfe_step = True
             # Reorder step_l and step_u such that step_l has better function value and points towards step_u
-            if psi_step_u_f >= psi_step_l_f:
-                step_l, step_u = step_l, step_u
-            else:
-                step_l, step_u = step_u, step_l
+            step_l, step_u = (
+                (step_l, step_u)
+                if psi_step_l_f <= psi_step_u_f
+                else (step_u, step_l)
+            )
             break
         if step_u >= max_step:
             break
@@ -745,7 +746,7 @@ def line_search(
     step = step_u
     while True:
         if line_search_function.sufficient_decrease_met(step):
-            if (line_search_function.x(step) == line_search_function.x0).all():
+            if step_l == 0.0 and (line_search_function.x(step) == line_search_function.x0).all():
                 if debug_options.report_wolfe_termination:
                     print("Terminated line search due to step of prepopulation being identical to x0")
                 return (
