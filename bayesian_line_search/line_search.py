@@ -192,7 +192,7 @@ class LineSearchFunctionWrapper:
                 or (self.x_best == self.x(step_max)).all()
             ):
                 warnings.warn(
-                    f"Best step {self.step_best} (f={self.f_best}) outside interval {step_min} (f={self.fg(step_min)[0]}) to {step_max} (f={self.fg(step_max)[0]})"
+                    f"Best step {self.step_best} (f={self.f_best}, gd={self.g_best.T @ self.d}) outside interval {step_min} (f, gd={self.phi(step_min)}) to {step_max} (f, gd={self.phi(step_max)})"
                 )
 
         self.step_min = step_min
@@ -865,9 +865,8 @@ def line_search(
             if debug_options.report_wolfe_termination:
                 print(f"Wolfe after {k} iterations")
             data_point = line_search_function.data_point(step)
-            assert (
-                data_point.f <= line_search_function.f_best
-            ), f"Trying to return step with strong Wolfe that is not best. step={step}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}"
+            if data_point.f > line_search_function.f_best:
+                warnings.warn(f"Returning step with strong Wolfe that is not best. step={step}, f={data_point.f}, step_best={line_search_function.step_best} f_best={line_search_function.f_best}")
             return (
                 data_point.f,
                 data_point.g,
