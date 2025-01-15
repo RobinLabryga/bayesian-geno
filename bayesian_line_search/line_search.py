@@ -286,6 +286,8 @@ class LineSearchFunctionWrapper:
 
     def sufficient_decrease_met(self, step):
         f, g = self.fg(step)
+        if f >= self.f0 and step != 0.0: # For any step != 0 with equal function value as 0, the sufficient decrease condition can never be met. Floating point math says otherwise sometimes
+            return False
         return f <= self.f0 + self.__wolfe_c1 * step * self.dg0
 
     def curvature_met(self, step):
