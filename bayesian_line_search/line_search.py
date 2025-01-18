@@ -748,24 +748,10 @@ def line_search(
     step = step_u
     while True:
         if line_search_function.sufficient_decrease_met(step):
-            if step_l == 0.0 and (line_search_function.x(step) == line_search_function.x0).all():
-                if debug_options.report_wolfe_termination:
-                    print("Terminated line search due to step of prepopulation being identical to x0")
-                return (
-                    line_search_function.f_best,
-                    line_search_function.g_best,
-                    line_search_function.x_best,
-                    (
-                        line_search_function.step_best
-                        if line_search_function.step_best != 0.0
-                        else None
-                    ),
-                    line_search_function.fun_eval,
-                )
             break
         if k > max_iter:
             if debug_options.report_wolfe_termination:
-                print("Terminated line search due to exceeded iteration count")
+                print("Terminated line search due to exceeded iteration count in prepopulation")
             return (
                 line_search_function.f_best,
                 line_search_function.g_best,
