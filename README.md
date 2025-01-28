@@ -2,7 +2,7 @@
 
 This repo contains a version of the [genosolver](https://github.com/slaue/genosolver) that uses Bayesian Optimization to perform line search.
 
-It was developed as part of the Masters thesis titled "Information Preserving Line Search via Bayesian Optimization" by Robin Labryga at the University of Hamburg in 2024.
+It was developed as part of a paper for the 2025 [LION19](https://lion19.org/) conference, titled "Information Preserving Line Search via Bayesian Optimization" by Robin Labryga, Tomislav Prusina, and Sören Laue.
 
 ## Code
 
